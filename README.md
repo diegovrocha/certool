@@ -21,7 +21,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). Single bina
 ### Quick install (macOS/Linux)
 
 ```bash
-curl -sSL https://github.com/diegovrocha/certool/releases/latest/download/certool_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | sudo tar -xz -C /usr/local/bin certool
+curl -sSLf https://raw.githubusercontent.com/diegovrocha/certool/main/install.sh | sh
 ```
 
 ### Manual download
