@@ -1,0 +1,45 @@
+version: 2
+
+builds:
+  - main: ./cmd/certool
+    binary: certool
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+brews:
+  - repository:
+      owner: diegovrocha
+      name: homebrew-certool
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    folder: Formula
+    homepage: "https://github.com/diegovrocha/certool"
+    description: "Digital certificate conversion, validation and generation TUI"
+    license: "MIT"
+    install: |
+      bin.install "certool"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

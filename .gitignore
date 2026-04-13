@@ -1,0 +1,11 @@
+.DS_Store
+/certool
+dist/
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.der
+/tmp/
