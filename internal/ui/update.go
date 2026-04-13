@@ -47,7 +47,7 @@ func CheckUpdate() string {
 
 		latest := strings.TrimPrefix(release.TagName, "v")
 		if latest != "" && latest != Version {
-			ch <- fmt.Sprintf("  Update v%s available! Run: brew upgrade certool", latest)
+			ch <- fmt.Sprintf("  Update v%s available → github.com/%s/%s/releases", latest, repoOwner, repoName)
 		} else {
 			ch <- ""
 		}

@@ -83,7 +83,8 @@ make uninstall  # remove from /usr/local/bin
 | Key | Action |
 |-----|--------|
 | `↑/↓` or `j/k` | Navigate menu and lists |
-| `Enter` | Select / Confirm |
+| `Enter` | Select / Confirm / Enter directory |
+| `←` | Go to parent directory |
 | `Esc` | Back to previous screen |
 | `q` | Quit |
 | Type | Filter files in file picker |
@@ -95,7 +96,7 @@ make uninstall  # remove from /usr/local/bin
 certool checks for updates automatically on startup via the GitHub releases API. If a new version is available, it shows:
 
 ```
-Update v1.1.0 available! Run: brew upgrade certool
+Update v1.1.0 available → github.com/diegovrocha/certool/releases
 ```
 
 ## License

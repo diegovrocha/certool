@@ -2,67 +2,137 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 )
 
+type fileEntry struct {
+	name  string
+	isDir bool
+	path  string
+}
+
 type FilePicker struct {
 	Prompt   string
-	allFiles []string
-	filtered []string
+	cwd      string
+	exts     []string
+	entries  []fileEntry
+	filtered []fileEntry
 	cursor   int
 	filter   textinput.Model
 	Selected string
 	Done     bool
 }
 
-func NewFilePicker(prompt string, findArgs ...string) FilePicker {
+func newPicker(prompt string, exts []string) FilePicker {
 	ti := textinput.New()
 	ti.Placeholder = "type to filter..."
 	ti.Focus()
 
-	files := findFiles(findArgs...)
+	cwd, _ := os.Getwd()
 
-	return FilePicker{
-		Prompt:   prompt,
-		allFiles: files,
-		filtered: files,
-		filter:   ti,
+	fp := FilePicker{
+		Prompt: prompt,
+		cwd:    cwd,
+		exts:   exts,
+		filter: ti,
 	}
+	fp.loadDir()
+	return fp
 }
 
 func NewCertFilePicker(prompt string) FilePicker {
-	return NewFilePicker(prompt,
-		"-iname", "*.pfx", "-o", "-iname", "*.p12",
-		"-o", "-iname", "*.pem", "-o", "-iname", "*.cer",
-		"-o", "-iname", "*.crt",
-	)
+	return newPicker(prompt, []string{".pfx", ".p12", ".pem", ".cer", ".crt"})
 }
 
 func NewAllFilePicker(prompt string) FilePicker {
-	return NewFilePicker(prompt,
-		"-iname", "*.pfx", "-o", "-iname", "*.p12",
-		"-o", "-iname", "*.pem", "-o", "-iname", "*.cer",
-		"-o", "-iname", "*.crt", "-o", "-iname", "*.key",
-	)
+	return newPicker(prompt, []string{".pfx", ".p12", ".pem", ".cer", ".crt", ".key"})
 }
 
 func NewPfxFilePicker(prompt string) FilePicker {
-	return NewFilePicker(prompt, "-iname", "*.pfx", "-o", "-iname", "*.p12")
+	return newPicker(prompt, []string{".pfx", ".p12"})
 }
 
 func NewCertOnlyPicker(prompt string) FilePicker {
-	return NewFilePicker(prompt,
-		"-iname", "*.pem", "-o", "-iname", "*.crt",
-		"-o", "-iname", "*.cer",
-	)
+	return newPicker(prompt, []string{".pem", ".crt", ".cer"})
 }
 
 func NewKeyPicker(prompt string) FilePicker {
-	return NewFilePicker(prompt, "-iname", "*.key", "-o", "-iname", "*.pem")
+	return newPicker(prompt, []string{".key", ".pem"})
+}
+
+func (fp *FilePicker) loadDir() {
+	fp.entries = nil
+	fp.cursor = 0
+	fp.filter.SetValue("")
+
+	dirEntries, err := os.ReadDir(fp.cwd)
+	if err != nil {
+		return
+	}
+
+	// Directories first
+	var dirs []fileEntry
+	var files []fileEntry
+
+	for _, e := range dirEntries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.IsDir() {
+			// Only show dirs that contain matching files (check 2 levels deep)
+			if fp.dirHasFiles(filepath.Join(fp.cwd, e.Name()), 2) {
+				dirs = append(dirs, fileEntry{name: e.Name() + "/", isDir: true, path: filepath.Join(fp.cwd, e.Name())})
+			}
+		} else {
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			for _, match := range fp.exts {
+				if ext == match {
+					files = append(files, fileEntry{name: e.Name(), isDir: false, path: filepath.Join(fp.cwd, e.Name())})
+					break
+				}
+			}
+		}
+	}
+
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].name < dirs[j].name })
+	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
+
+	fp.entries = append(dirs, files...)
+	fp.filtered = fp.entries
+}
+
+func (fp *FilePicker) dirHasFiles(dir string, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.IsDir() {
+			if fp.dirHasFiles(filepath.Join(dir, e.Name()), depth-1) {
+				return true
+			}
+		} else {
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			for _, match := range fp.exts {
+				if ext == match {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (fp FilePicker) Init() tea.Cmd {
@@ -83,11 +153,26 @@ func (fp FilePicker) Update(msg tea.Msg) (FilePicker, tea.Cmd) {
 				fp.cursor++
 			}
 			return fp, nil
-		case "enter":
-			if len(fp.filtered) > 0 {
-				fp.Selected = fp.filtered[fp.cursor]
-				fp.Done = true
+		case "left":
+			// Go to parent directory
+			parent := filepath.Dir(fp.cwd)
+			if parent != fp.cwd {
+				fp.cwd = parent
+				fp.loadDir()
 			}
+			return fp, nil
+		case "enter":
+			if len(fp.filtered) == 0 {
+				return fp, nil
+			}
+			entry := fp.filtered[fp.cursor]
+			if entry.isDir {
+				fp.cwd = entry.path
+				fp.loadDir()
+				return fp, nil
+			}
+			fp.Selected = entry.path
+			fp.Done = true
 			return fp, nil
 		}
 	}
@@ -99,12 +184,12 @@ func (fp FilePicker) Update(msg tea.Msg) (FilePicker, tea.Cmd) {
 	// Apply filter
 	query := strings.ToLower(fp.filter.Value())
 	if query == "" {
-		fp.filtered = fp.allFiles
+		fp.filtered = fp.entries
 	} else {
 		fp.filtered = nil
-		for _, f := range fp.allFiles {
-			if strings.Contains(strings.ToLower(f), query) {
-				fp.filtered = append(fp.filtered, f)
+		for _, e := range fp.entries {
+			if strings.Contains(strings.ToLower(e.name), query) {
+				fp.filtered = append(fp.filtered, e)
 			}
 		}
 	}
@@ -123,11 +208,21 @@ func (fp FilePicker) Update(msg tea.Msg) (FilePicker, tea.Cmd) {
 func (fp FilePicker) View() string {
 	var b strings.Builder
 
-	b.WriteString("  " + ActiveStyle.Render(fp.Prompt) + "\n\n")
+	b.WriteString("  " + ActiveStyle.Render(fp.Prompt) + "\n")
+
+	// Breadcrumb
+	home, _ := os.UserHomeDir()
+	display := fp.cwd
+	if strings.HasPrefix(display, home) {
+		display = "~" + display[len(home):]
+	}
+	b.WriteString("  " + DimStyle.Render("📂 "+display) + "\n\n")
+
 	b.WriteString("  " + fp.filter.View() + "\n\n")
 
-	if len(fp.allFiles) == 0 {
-		b.WriteString("  " + ErrorStyle.Render("No files found") + "\n")
+	if len(fp.entries) == 0 {
+		b.WriteString("  " + ErrorStyle.Render("No files found in this directory") + "\n")
+		b.WriteString("  " + DimStyle.Render("← go to parent directory") + "\n")
 		return b.String()
 	}
 
@@ -152,11 +247,15 @@ func (fp FilePicker) View() string {
 	}
 
 	for i := start; i < end; i++ {
-		f := fp.filtered[i]
+		e := fp.filtered[i]
+		icon := "  "
+		if e.isDir {
+			icon = "📁 "
+		}
 		if i == fp.cursor {
-			b.WriteString(fmt.Sprintf("  %s%s\n", ActiveStyle.Render("➤ "), ActiveStyle.Render(f)))
+			b.WriteString(fmt.Sprintf("  %s%s%s\n", ActiveStyle.Render("➤ "), icon, ActiveStyle.Render(e.name)))
 		} else {
-			b.WriteString(fmt.Sprintf("    %s\n", f))
+			b.WriteString(fmt.Sprintf("    %s%s\n", icon, e.name))
 		}
 	}
 
@@ -165,25 +264,18 @@ func (fp FilePicker) View() string {
 		b.WriteString(fmt.Sprintf("  %s\n", DimStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining))))
 	}
 
-	b.WriteString(fmt.Sprintf("\n  %s\n", DimStyle.Render(fmt.Sprintf("%d of %d files", len(fp.filtered), len(fp.allFiles)))))
-
-	return b.String()
-}
-
-func findFiles(args ...string) []string {
-	findArgs := []string{".", "-maxdepth", "5", "-type", "f", "("}
-	findArgs = append(findArgs, args...)
-	findArgs = append(findArgs, ")")
-	out, err := exec.Command("find", findArgs...).Output()
-	if err != nil {
-		return nil
-	}
-	var result []string
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		l = strings.TrimPrefix(l, "./")
-		if l != "" {
-			result = append(result, l)
+	// Count files and dirs
+	nDirs := 0
+	nFiles := 0
+	for _, e := range fp.filtered {
+		if e.isDir {
+			nDirs++
+		} else {
+			nFiles++
 		}
 	}
-	return result
+	b.WriteString(fmt.Sprintf("\n  %s\n", DimStyle.Render(fmt.Sprintf("%d files, %d folders", nFiles, nDirs))))
+	b.WriteString("  " + DimStyle.Render("← parent  enter open/select") + "\n")
+
+	return b.String()
 }
