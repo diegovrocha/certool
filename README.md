@@ -18,25 +18,28 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). Single bina
 
 ## Install
 
-### Binary (recommended)
-
-Download from [Releases](https://github.com/diegovrocha/certool/releases), extract and move to your PATH:
+### Quick install (macOS/Linux)
 
 ```bash
-# macOS (Apple Silicon)
-tar -xzf certool_darwin_arm64.tar.gz
-sudo mv certool /usr/local/bin/
+curl -sSL https://github.com/diegovrocha/certool/releases/latest/download/certool_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | sudo tar -xz -C /usr/local/bin certool
+```
 
-# macOS (Intel)
-tar -xzf certool_darwin_amd64.tar.gz
-sudo mv certool /usr/local/bin/
+### Manual download
 
-# Linux (amd64)
-tar -xzf certool_linux_amd64.tar.gz
-sudo mv certool /usr/local/bin/
+Download the binary for your platform from [Releases](https://github.com/diegovrocha/certool/releases):
 
-# Linux (arm64)
-tar -xzf certool_linux_arm64.tar.gz
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `certool_darwin_arm64.tar.gz` |
+| macOS (Intel) | `certool_darwin_amd64.tar.gz` |
+| Linux (amd64) | `certool_linux_amd64.tar.gz` |
+| Linux (arm64) | `certool_linux_arm64.tar.gz` |
+| Windows (amd64) | `certool_windows_amd64.zip` |
+
+Extract and move to your PATH:
+
+```bash
+tar -xzf certool_<os>_<arch>.tar.gz
 sudo mv certool /usr/local/bin/
 ```
 
