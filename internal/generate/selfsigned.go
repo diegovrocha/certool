@@ -16,7 +16,9 @@ type genStep int
 
 const (
 	genDays genStep = iota
+	genAlgo
 	genBits
+	genCurve
 	genOutCert
 	genOutKey
 	genCN
@@ -40,12 +42,30 @@ var sanPresetLabels = []string{
 	"Custom                  (type your own list)",
 }
 
+// Algorithm choices
+var algoLabels = []string{
+	"RSA  (traditional, broad compatibility)",
+	"EC   (modern, faster, smaller keys — recommended)",
+}
+
+// EC curve choices (openssl name, display label)
+var curveOptions = []struct {
+	name  string
+	label string
+}{
+	{"prime256v1", "P-256  (256 bits — TLS 1.3 default, recommended)"},
+	{"secp384r1", "P-384  (384 bits — NSA Suite B)"},
+	{"secp521r1", "P-521  (521 bits — paranoid)"},
+}
+
 type Model struct {
 	step    genStep
 	input   textinput.Model
 	optCur  int
 	days    string
-	bits    string
+	algo    string // "RSA" or "EC"
+	bits    string // RSA: "2048"/"4096"; EC: empty
+	curve   string // EC: "prime256v1" etc.; RSA: empty
 	outCert string
 	outKey  string
 	cn      string
@@ -94,10 +114,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.message
 		m.step = genDone
 		if msg.success {
+			algoDesc := m.algo
+			if m.algo == "RSA" {
+				algoDesc = "RSA-" + m.bits
+			} else if m.algo == "EC" {
+				algoDesc = "EC-" + m.curve
+			}
 			history.Log("generate_self_signed",
 				history.KV("cn", m.cn),
 				history.KV("days", m.days),
-				history.KV("bits", m.bits),
+				history.KV("algo", algoDesc),
 				history.KV("sans", fmt.Sprintf("%d", len(m.sans))),
 				history.KV("output", m.outCert))
 		}
@@ -124,15 +150,19 @@ func isInputStep(s genStep) bool {
 }
 
 func isChoiceStep(s genStep) bool {
-	return s == genDays || s == genBits || s == genSANPreset
+	return s == genDays || s == genAlgo || s == genBits || s == genCurve || s == genSANPreset
 }
 
 func choiceMax(s genStep) int {
 	switch s {
 	case genDays:
 		return 4 // 5 options (0-4)
+	case genAlgo:
+		return 1 // 2 options
 	case genBits:
 		return 1 // 2 options (0-1)
+	case genCurve:
+		return len(curveOptions) - 1
 	case genSANPreset:
 		return len(sanPresetLabels) - 1
 	}
@@ -158,12 +188,28 @@ func (m *Model) advance() (tea.Model, tea.Cmd) {
 	case genDays:
 		days := []string{"30", "90", "365", "730", "3650"}
 		m.days = days[m.optCur]
-		m.step = genBits
-		m.optCur = 0
+		m.step = genAlgo
+		m.optCur = 1 // default EC (recommended)
+
+	case genAlgo:
+		if m.optCur == 0 {
+			m.algo = "RSA"
+			m.step = genBits
+			m.optCur = 0
+		} else {
+			m.algo = "EC"
+			m.step = genCurve
+			m.optCur = 0 // default P-256
+		}
 
 	case genBits:
 		bits := []string{"2048", "4096"}
 		m.bits = bits[m.optCur]
+		m.step = genOutCert
+		return m, m.newInput("certificate.crt")
+
+	case genCurve:
+		m.curve = curveOptions[m.optCur].name
 		m.step = genOutCert
 		return m, m.newInput("certificate.crt")
 
@@ -302,19 +348,39 @@ func (m *Model) doGenerate() tea.Cmd {
 			subject += "/L=" + m.city
 		}
 
-		args := []string{
-			"req", "-x509",
-			"-newkey", "rsa:" + m.bits, "-nodes",
-			"-keyout", m.outKey, "-out", m.outCert,
-			"-days", m.days, "-subj", subject,
-		}
-		if len(m.sans) > 0 {
-			args = append(args, "-addext", "subjectAltName="+strings.Join(m.sans, ","))
+		var cmd *exec.Cmd
+		if m.algo == "EC" {
+			// EC needs process substitution for the curve params: ec:<(openssl ecparam ...)
+			// That requires bash, so we build a shell command.
+			sanExt := ""
+			if len(m.sans) > 0 {
+				sanExt = " -addext " + shellQuote("subjectAltName="+strings.Join(m.sans, ","))
+			}
+			script := fmt.Sprintf(
+				"openssl req -x509 -newkey ec:<(openssl ecparam -name %s) -nodes -keyout %s -out %s -days %s -subj %s%s",
+				shellQuote(m.curve),
+				shellQuote(m.outKey),
+				shellQuote(m.outCert),
+				m.days,
+				shellQuote(subject),
+				sanExt,
+			)
+			cmd = exec.Command("bash", "-c", script)
+		} else {
+			args := []string{
+				"req", "-x509",
+				"-newkey", "rsa:" + m.bits, "-nodes",
+				"-keyout", m.outKey, "-out", m.outCert,
+				"-days", m.days, "-subj", subject,
+			}
+			if len(m.sans) > 0 {
+				args = append(args, "-addext", "subjectAltName="+strings.Join(m.sans, ","))
+			}
+			cmd = exec.Command("openssl", args...)
 		}
 
-		err := exec.Command("openssl", args...).Run()
-		if err != nil {
-			return genResult{false, "Generation failed: " + err.Error()}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return genResult{false, "Generation failed: " + err.Error() + "\n" + strings.TrimSpace(string(out))}
 		}
 
 		os.Chmod(m.outKey, 0600)
@@ -322,10 +388,21 @@ func (m *Model) doGenerate() tea.Cmd {
 		if len(m.sans) > 0 {
 			sanInfo = fmt.Sprintf("\nSANs: %d entries (%s)", len(m.sans), m.sanDesc)
 		}
-		msg := fmt.Sprintf("Cert: %s\nKey:  %s\nCN: %s | %s days | RSA %s%s",
-			m.outCert, m.outKey, m.cn, m.days, m.bits, sanInfo)
+		var keyInfo string
+		if m.algo == "EC" {
+			keyInfo = "EC " + m.curve
+		} else {
+			keyInfo = "RSA " + m.bits
+		}
+		msg := fmt.Sprintf("Cert: %s\nKey:  %s\nCN: %s | %s days | %s%s",
+			m.outCert, m.outKey, m.cn, m.days, keyInfo, sanInfo)
 		return genResult{true, msg}
 	}
+}
+
+// shellQuote safely quotes a string for bash execution.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // parseCustomSANs splits a comma-separated list and normalizes entries.
@@ -417,6 +494,18 @@ func (m *Model) View() string {
 			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(d)))
 		}
 
+	case genAlgo:
+		b.WriteString("  Key algorithm:\n\n")
+		for i, d := range algoLabels {
+			cursor := "  "
+			style := ui.InactiveStyle
+			if i == m.optCur {
+				cursor = ui.ActiveStyle.Render("➤ ")
+				style = ui.ActiveStyle
+			}
+			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(d)))
+		}
+
 	case genBits:
 		b.WriteString("  RSA key size:\n\n")
 		for i, d := range []string{"2048", "4096"} {
@@ -427,6 +516,18 @@ func (m *Model) View() string {
 				style = ui.ActiveStyle
 			}
 			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(d)))
+		}
+
+	case genCurve:
+		b.WriteString("  EC curve:\n\n")
+		for i, c := range curveOptions {
+			cursor := "  "
+			style := ui.InactiveStyle
+			if i == m.optCur {
+				cursor = ui.ActiveStyle.Render("➤ ")
+				style = ui.ActiveStyle
+			}
+			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(c.label)))
 		}
 
 	case genOutCert:
@@ -500,9 +601,17 @@ func (m *Model) viewSummary(b *strings.Builder) {
 		value string
 		step  genStep
 	}
+	// Algo summary value depends on which branch was taken
+	algoVal := m.algo
+	if m.algo == "RSA" && m.bits != "" {
+		algoVal = "RSA " + m.bits
+	} else if m.algo == "EC" && m.curve != "" {
+		algoVal = "EC " + m.curve
+	}
+
 	fields := []field{
 		{"Days", m.days, genDays},
-		{"RSA", m.bits, genBits},
+		{"Algo", algoVal, genAlgo},
 		{"Cert", m.outCert, genOutCert},
 		{"Key", m.outKey, genOutKey},
 		{"CN", m.cn, genCN},
