@@ -66,9 +66,9 @@ func CommonHelp() HelpSection {
 	return HelpSection{
 		Title: "Global",
 		Entries: []HelpEntry{
-			{"?", "Toggle this help overlay"},
-			{"esc", "Back to previous screen"},
-			{"ctrl+c", "Quit certui"},
+			{Key: "?", Desc: "Toggle this help overlay"},
+			{Key: "esc", Desc: "Back to previous screen"},
+			{Key: "ctrl+c", Desc: "Quit certui"},
 		},
 	}
 }

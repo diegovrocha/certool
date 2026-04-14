@@ -418,17 +418,17 @@ func (m *Model) renderHelp() string {
 		{
 			Title: "Input",
 			Entries: []ui.HelpEntry{
-				{"type", "Enter host[:port]"},
-				{"enter", "Fetch chain"},
+				{Key: "type", Desc: "Enter host[:port]"},
+				{Key: "enter", Desc: "Fetch chain"},
 			},
 		},
 		{
 			Title: "Result",
 			Entries: []ui.HelpEntry{
-				{"s", "Save chain to file"},
-				{"f", "Toggle full view (inspect)"},
-				{"y", "Copy to clipboard (inspect)"},
-				{"↑/↓", "Scroll (inspect)"},
+				{Key: "s", Desc: "Save chain to file"},
+				{Key: "f", Desc: "Toggle full view (inspect)"},
+				{Key: "y", Desc: "Copy to clipboard (inspect)"},
+				{Key: "↑/↓", Desc: "Scroll (inspect)"},
 			},
 		},
 		ui.CommonHelp(),

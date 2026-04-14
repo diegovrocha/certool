@@ -137,10 +137,10 @@ func (m *Model) renderHelp() string {
 		{
 			Title: "Navigation",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Scroll one line"},
-				{"PgUp/PgDn", "Page up / down"},
-				{"g", "Top"},
-				{"G", "Bottom"},
+				{Key: "↑/↓", Desc: "Scroll one line"},
+				{Key: "PgUp/PgDn", Desc: "Page up / down"},
+				{Key: "g", Desc: "Top"},
+				{Key: "G", Desc: "Bottom"},
 			},
 		},
 		ui.CommonHelp(),

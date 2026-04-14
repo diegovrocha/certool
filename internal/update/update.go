@@ -468,16 +468,16 @@ func (m *Model) renderHelp() string {
 		{
 			Title: "Confirm",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Scroll changelog"},
-				{"enter", "Install update"},
-				{"esc", "Cancel"},
+				{Key: "↑/↓", Desc: "Scroll changelog"},
+				{Key: "enter", Desc: "Install update"},
+				{Key: "esc", Desc: "Cancel"},
 			},
 		},
 		{
 			Title: "After success",
 			Entries: []ui.HelpEntry{
-				{"r / enter", "Restart now"},
-				{"c", "Cancel auto-restart"},
+				{Key: "r / enter", Desc: "Restart now"},
+				{Key: "c", Desc: "Cancel auto-restart"},
 			},
 		},
 		ui.CommonHelp(),

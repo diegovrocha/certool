@@ -222,19 +222,19 @@ func (m *ChainModel) renderHelp() string {
 		{
 			Title: "Flow",
 			Entries: []ui.HelpEntry{
-				{"1.", "Select end-entity certificate"},
-				{"2.", "Optionally select intermediate cert"},
-				{"3.", "Optionally select Root CA"},
-				{"4.", "Result"},
+				{Key: "1.", Desc: "Select end-entity certificate"},
+				{Key: "2.", Desc: "Optionally select intermediate cert"},
+				{Key: "3.", Desc: "Optionally select Root CA"},
+				{Key: "4.", Desc: "Result"},
 			},
 		},
 		{
 			Title: "File picker",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Navigate entries"},
-				{"→ / enter", "Open folder"},
-				{"←", "Parent folder"},
-				{"type", "Filter entries"},
+				{Key: "↑/↓", Desc: "Navigate entries"},
+				{Key: "→ / enter", Desc: "Open folder"},
+				{Key: "←", Desc: "Parent folder"},
+				{Key: "type", Desc: "Filter entries"},
 			},
 		},
 		ui.CommonHelp(),
@@ -392,18 +392,18 @@ func (m *CertKeyModel) renderHelp() string {
 		{
 			Title: "Flow",
 			Entries: []ui.HelpEntry{
-				{"1.", "Select certificate"},
-				{"2.", "Select private key"},
-				{"3.", "Result"},
+				{Key: "1.", Desc: "Select certificate"},
+				{Key: "2.", Desc: "Select private key"},
+				{Key: "3.", Desc: "Result"},
 			},
 		},
 		{
 			Title: "File picker",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Navigate entries"},
-				{"→ / enter", "Open folder"},
-				{"←", "Parent folder"},
-				{"type", "Filter entries"},
+				{Key: "↑/↓", Desc: "Navigate entries"},
+				{Key: "→ / enter", Desc: "Open folder"},
+				{Key: "←", Desc: "Parent folder"},
+				{Key: "type", Desc: "Filter entries"},
 			},
 		},
 		ui.CommonHelp(),
@@ -1085,17 +1085,17 @@ func (m *CompareHashModel) renderHelp() string {
 		{
 			Title: "Flow",
 			Entries: []ui.HelpEntry{
-				{"1.", "Select certificate 1"},
-				{"2.", "Select certificate 2"},
-				{"3.", "Prompt: add another?"},
-				{"4.", "Result"},
+				{Key: "1.", Desc: "Select certificate 1"},
+				{Key: "2.", Desc: "Select certificate 2"},
+				{Key: "3.", Desc: "Prompt: add another?"},
+				{Key: "4.", Desc: "Result"},
 			},
 		},
 		{
 			Title: "Result",
 			Entries: []ui.HelpEntry{
-				{"d", "Diff view (2 certs)"},
-				{"matrix", "Auto shown for 3+ certs"},
+				{Key: "d", Desc: "Diff view (2 certs)"},
+				{Key: "matrix", Desc: "Auto shown for 3+ certs"},
 			},
 		},
 		ui.CommonHelp(),

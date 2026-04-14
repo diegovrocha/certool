@@ -287,17 +287,17 @@ func (m Model) renderHelp() string {
 		{
 			Title: "Steps",
 			Entries: []ui.HelpEntry{
-				{"enter", "Confirm current step"},
-				{"type", "Fill file / password / output fields"},
+				{Key: "enter", Desc: "Confirm current step"},
+				{Key: "type", Desc: "Fill file / password / output fields"},
 			},
 		},
 		{
 			Title: "File picker",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Navigate entries"},
-				{"→ / enter", "Open folder"},
-				{"←", "Parent folder"},
-				{"type", "Filter entries"},
+				{Key: "↑/↓", Desc: "Navigate entries"},
+				{Key: "→ / enter", Desc: "Open folder"},
+				{Key: "←", Desc: "Parent folder"},
+				{Key: "type", Desc: "Filter entries"},
 			},
 		},
 		ui.CommonHelp(),

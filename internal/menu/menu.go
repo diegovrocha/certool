@@ -440,16 +440,16 @@ func (m Model) renderHelp() string {
 		{
 			Title: "Navigation",
 			Entries: []ui.HelpEntry{
-				{"↑/↓ or j/k", "Navigate menu items"},
-				{"enter", "Select highlighted item"},
-				{"q", "Quit certui"},
+				{Key: "↑/↓ or j/k", Desc: "Navigate menu items"},
+				{Key: "enter", Desc: "Select highlighted item"},
+				{Key: "q", Desc: "Quit certui"},
 			},
 		},
 		{
 			Title: "Search",
 			Entries: []ui.HelpEntry{
-				{"/", "Fuzzy filter menu items"},
-				{"esc", "Clear filter"},
+				{Key: "/", Desc: "Fuzzy filter menu items"},
+				{Key: "esc", Desc: "Clear filter"},
 			},
 		},
 		ui.CommonHelp(),

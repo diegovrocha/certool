@@ -618,15 +618,15 @@ func (m *Model) renderHelp() string {
 		{
 			Title: "Steps",
 			Entries: []ui.HelpEntry{
-				{"enter", "Confirm current step"},
-				{"enter (empty)", "Skip optional fields"},
-				{"esc", "Back"},
+				{Key: "enter", Desc: "Confirm current step"},
+				{Key: "enter (empty)", Desc: "Skip optional fields"},
+				{Key: "esc", Desc: "Back"},
 			},
 		},
 		{
 			Title: "Preset shortcuts",
 			Entries: []ui.HelpEntry{
-				{"↑/↓", "Choose preset / option"},
+				{Key: "↑/↓", Desc: "Choose preset / option"},
 			},
 		},
 		ui.CommonHelp(),
