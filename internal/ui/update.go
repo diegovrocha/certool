@@ -46,7 +46,13 @@ func CheckUpdate() string {
 		}
 
 		latest := strings.TrimPrefix(release.TagName, "v")
-		if latest != "" && latest != Version {
+		// Normalize: "1.0.0" matches "1.0", "1.0.0" matches "1.0.0"
+		norm := func(v string) string {
+			v = strings.TrimRight(v, ".0")
+			if v == "" { v = "0" }
+			return v
+		}
+		if latest != "" && norm(latest) != norm(Version) {
 			ch <- fmt.Sprintf("  Update v%s available → github.com/%s/%s/releases", latest, repoOwner, repoName)
 		} else {
 			ch <- ""

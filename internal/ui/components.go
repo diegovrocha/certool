@@ -13,7 +13,13 @@ func OpenSSLVersion() string {
 	if err != nil {
 		return "OpenSSL not found"
 	}
-	return strings.TrimSpace(string(out))
+	// OpenSSL 3.x output: "OpenSSL 3.6.1 27 Jan 2026 (Library: OpenSSL 3.6.1 27 Jan 2026)"
+	// Strip the "(Library: ...)" suffix
+	v := strings.TrimSpace(string(out))
+	if idx := strings.Index(v, " (Library:"); idx >= 0 {
+		v = v[:idx]
+	}
+	return v
 }
 
 func ResultBox(success bool, title string, lines ...string) string {

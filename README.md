@@ -57,7 +57,7 @@ Other make targets:
 
 ```bash
 make build      # build binary locally
-make test       # run tests
+make test       # run 22 Go tests across ui/menu/inspect packages
 make uninstall  # remove from /usr/local/bin
 ```
 
@@ -76,7 +76,11 @@ make uninstall  # remove from /usr/local/bin
 - **Compare certs** — compare two certificates by fingerprint, serial, subject and modulus. Supports PFX/PEM/DER
 
 ### Generate
-- **Self-signed** — generate certificate + key for dev/testing with optional subject fields (O, OU, C, ST, L)
+- **Self-signed** — generate certificate + key for dev/testing. Configurable validity (30/90/365/730/3650 days), RSA key size (2048/4096) and optional subject fields (O, OU, C, ST, L)
+
+### Dashboard
+- **Quick Info sidebar** — on terminals with 85+ columns, a sidebar shows the count of certificate files in the current directory (`.pfx`/`.p12`, `.pem`/`.crt`, `.cer`/`.der`, `.key`)
+- **Interactive file picker** — browse directories with breadcrumb, real-time text filter, and auto-hide of folders without matching files
 
 ## Navigation
 

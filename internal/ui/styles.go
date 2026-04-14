@@ -51,7 +51,7 @@ var (
 			Padding(1, 2)
 )
 
-const Version = "1.0"
+const Version = "1.0.0"
 
 func Banner() string {
 	logo := TitleStyle.Render(
