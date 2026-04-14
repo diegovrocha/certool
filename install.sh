@@ -15,7 +15,14 @@ echo "  Arch: ${ARCH}"
 echo "  From: ${URL}"
 echo ""
 
-curl -sSLf "$URL" | sudo tar -xz -C "$DEST" certui
+# Use sudo only when needed (skip when already root, e.g. in Docker)
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
+curl -sSLf "$URL" | $SUDO tar -xz -C "$DEST" certui
 
 echo "✔ certui installed to ${DEST}/certui"
 echo "  Run: certui"

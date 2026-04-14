@@ -27,14 +27,23 @@ const (
 )
 
 type Model struct {
-	step      step
-	current   string
-	latest    string
-	body      string
-	scroll    int
-	result    string
-	success   bool
+	step            step
+	current         string
+	latest          string
+	body            string
+	scroll          int
+	result          string
+	success         bool
+	restartAt       time.Time // when to auto-restart; zero = disabled
+	restartCanceled bool
 }
+
+type restartTickMsg struct{}
+type doRestartMsg struct{}
+
+// RestartRequested is set to true when the user confirms an auto-restart
+// after a successful update. main.go checks this after tea.Quit to re-exec.
+var RestartRequested bool
 
 type updateInfoMsg struct {
 	latest string
@@ -99,11 +108,48 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.success = msg.success
 		m.result = msg.message
 		m.step = stepDone
+		if msg.success {
+			// Schedule auto-restart in 3 seconds
+			m.restartAt = time.Now().Add(3 * time.Second)
+			return m, tea.Tick(1*time.Second, func(time.Time) tea.Msg { return restartTickMsg{} })
+		}
 		return m, nil
+
+	case restartTickMsg:
+		if m.restartCanceled || m.restartAt.IsZero() {
+			return m, nil
+		}
+		if time.Now().After(m.restartAt) {
+			return m, func() tea.Msg { return doRestartMsg{} }
+		}
+		// Schedule next tick
+		return m, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return restartTickMsg{} })
+
+	case doRestartMsg:
+		// Flag main.go to re-exec after TUI tears down
+		RestartRequested = true
+		return m, tea.Quit
 
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
+			if m.step == stepDone && !m.restartAt.IsZero() {
+				// Cancel auto-restart
+				m.restartCanceled = true
+				m.restartAt = time.Time{}
+				return m, nil
+			}
 			return m, nil
+		}
+		if m.step == stepDone && m.success {
+			switch msg.String() {
+			case "r", "R", "enter":
+				// Restart now
+				return m, func() tea.Msg { return doRestartMsg{} }
+			case "c", "C":
+				m.restartCanceled = true
+				m.restartAt = time.Time{}
+				return m, nil
+			}
 		}
 		if m.step == stepConfirm {
 			switch msg.String() {
@@ -204,7 +250,7 @@ func (m *Model) doUpdate() tea.Cmd {
 			return downloadResultMsg{false, "Replace failed: " + err.Error()}
 		}
 
-		return downloadResultMsg{true, fmt.Sprintf("Updated to v%s. Restart certui to use the new version.", m.latest)}
+		return downloadResultMsg{true, fmt.Sprintf("Updated to v%s.", m.latest)}
 	}
 }
 
@@ -379,12 +425,25 @@ func (m *Model) View() string {
 		b.WriteString("\n")
 		if m.success {
 			b.WriteString(ui.ResultBox(true, "Success", m.result))
+			if !m.restartAt.IsZero() && !m.restartCanceled {
+				remaining := int(time.Until(m.restartAt).Seconds() + 0.5)
+				if remaining < 0 {
+					remaining = 0
+				}
+				b.WriteString("\n  " + ui.WarnStyle.Render(fmt.Sprintf("⏱ Restarting in %ds...", remaining)) + "\n")
+			} else if m.restartCanceled {
+				b.WriteString("\n  " + ui.DimStyle.Render("Auto-restart canceled. Quit and relaunch manually to use the new version.") + "\n")
+			}
 		} else {
 			b.WriteString(ui.ResultBox(false, "Error", m.result))
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm  ctrl+c quit") + "\n")
+	if m.step == stepDone && m.success && !m.restartCanceled {
+		b.WriteString("\n  " + ui.DimStyle.Render("r / enter restart now  c cancel auto-restart  esc back  ctrl+c quit") + "\n")
+	} else {
+		b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm  ctrl+c quit") + "\n")
+	}
 	return b.String()
 }
 
