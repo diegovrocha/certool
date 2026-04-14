@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	ColorCyan    = lipgloss.Color("14")
@@ -51,16 +55,22 @@ var (
 			Padding(1, 2)
 )
 
-const Version = "1.0.0"
+// Version is set at build time via ldflags by GoReleaser.
+// Falls back to "dev" when built locally without ldflags.
+var Version = "dev"
 
 func Banner() string {
-	logo := TitleStyle.Render(
-		"  ____         _____ _   _ ___\n"+
-			" / ___|___ _ _|_   _| | | |_ _|\n"+
-			"| |   / _ \\ '__|| | | | | || |\n"+
-			"| |__|  __/ |   | | | |_| || |\n"+
-			" \\____\\___|_|   |_|  \\___/|___|") +
-		DimStyle.Render("  v"+Version)
-	subtitle := SubtitleStyle.Render("  Digital certificate conversion, validation and generation")
-	return logo + "\n" + subtitle + "\n"
+	t := TitleStyle.Render
+	d := DimStyle.Render
+	s := SubtitleStyle.Render
+
+	// All logo lines padded to 31 chars so right-side text aligns
+	var b strings.Builder
+	b.WriteString(t("  ____         _____ _   _ ___ ") + "\n")
+	b.WriteString(t(" / ___|___ _ _|_   _| | | |_ _|") + "  " + s("Cert + TUI") + "\n")
+	b.WriteString(t("| |   / _ \\ '__|| | | | | || | ") + "  " + s("Digital certificate conversion,") + "\n")
+	b.WriteString(t("| |__|  __/ |   | | | |_| || | ") + "  " + s("validation and generation.") + "\n")
+	b.WriteString(t(" \\____\\___|_|   |_|  \\___/|___|") + "  " + d("https://github.com/diegovrocha/certui") + "\n")
+	b.WriteString(d("                                 v"+Version) + "\n")
+	return b.String()
 }

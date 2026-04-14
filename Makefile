@@ -1,8 +1,10 @@
 PREFIX ?= /usr/local
 BINARY = certui
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X github.com/diegovrocha/certui/internal/ui.Version=$(VERSION)
 
 build:
-	go build -o $(BINARY) ./cmd/certui
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/certui
 
 install: build
 	@mkdir -p $(PREFIX)/bin

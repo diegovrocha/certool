@@ -7,10 +7,10 @@
 
 ```
   ____         _____ _   _ ___
- / ___|___ _ _|_   _| | | |_ _|
-| |   / _ \ '__|| | | | | || |
-| |__|  __/ |   | | | |_| || |
- \____\___|_|   |_|  \___/|___|
+ / ___|___ _ _|_   _| | | |_ _|  Cert + TUI
+| |   / _ \ '__|| | | | | || |   Digital certificate conversion,
+| |__|  __/ |   | | | |_| || |   validation and generation.
+ \____\___|_|   |_|  \___/|___|  https://github.com/diegovrocha/certui
 ```
 
 Digital certificate conversion, validation and generation TUI.
@@ -85,9 +85,14 @@ make uninstall  # remove from /usr/local/bin
 ### Generate
 - **Self-signed** — generate certificate + key for dev/testing. Configurable validity (30/90/365/730/3650 days), RSA key size (2048/4096) and optional subject fields (O, OU, C, ST, L)
 
-### Dashboard
-- **Quick Info sidebar** — on terminals with 85+ columns, a sidebar shows the count of certificate files in the current directory (`.pfx`/`.p12`, `.pem`/`.crt`, `.cer`/`.der`, `.key`)
-- **Interactive file picker** — browse directories with breadcrumb, real-time text filter, and auto-hide of folders without matching files
+### Update
+- **In-app update** — download and install the latest version directly from GitHub without leaving the TUI
+- **Startup check** — auto-detects new releases on launch and shows a notice in the banner
+
+### File picker
+- **Directory navigation** — breadcrumb path, enter folders with `Enter`, go up with `←`
+- **Live filter** — type to filter files by name in real time
+- **Smart folders** — directories without matching certificate files are hidden automatically
 
 ## Navigation
 
@@ -95,20 +100,13 @@ make uninstall  # remove from /usr/local/bin
 |-----|--------|
 | `↑/↓` or `j/k` | Navigate menu and lists |
 | `Enter` | Select / Confirm / Enter directory |
-| `←` | Go to parent directory |
+| `←` | Go to parent directory (file picker) |
 | `Esc` | Back to previous screen |
-| `q` | Quit |
+| `q` | Quit (main menu) |
+| `Ctrl+C` | Quit from anywhere |
 | Type | Filter files in file picker |
 | `f` | Toggle full view (inspect) |
 | `n` | Inspect another certificate |
-
-## Update
-
-certui checks for updates automatically on startup via the GitHub releases API. If a new version is available, it shows:
-
-```
-Update v1.1.0 available → github.com/diegovrocha/certui/releases
-```
 
 ## License
 

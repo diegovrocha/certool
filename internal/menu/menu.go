@@ -2,25 +2,16 @@ package menu
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-runewidth"
 	"github.com/diegovrocha/certui/internal/convert"
 	"github.com/diegovrocha/certui/internal/generate"
 	"github.com/diegovrocha/certui/internal/inspect"
 	"github.com/diegovrocha/certui/internal/ui"
+	"github.com/diegovrocha/certui/internal/update"
 	"github.com/diegovrocha/certui/internal/verify"
 )
-
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// visWidth returns the visual display width of a string, ignoring ANSI codes
-func visWidth(s string) int {
-	clean := ansiRegex.ReplaceAllString(s, "")
-	return runewidth.StringWidth(clean)
-}
 
 type menuItem struct {
 	label       string
@@ -46,8 +37,6 @@ type Model struct {
 	quitting   bool
 	updateMsg  string
 	updateDone bool
-	stats      ui.FileStats
-	statsReady bool
 }
 
 func New() Model {
@@ -66,6 +55,7 @@ func New() Model {
 		{label: "── GENERATE ─────────────────────────────────────", isSeparator: true},
 		{label: "Generate self-signed", desc: "create cert + key for dev/testing", action: "gen_self"},
 		{label: "─────────────────────────────────────────────────", isSeparator: true},
+		{label: "Update", desc: "download and install the latest version", action: "update"},
 		{label: "Quit", action: "quit"},
 	}
 
@@ -74,18 +64,13 @@ func New() Model {
 }
 
 type updateCheckMsg string
-type statsMsg struct{ stats ui.FileStats }
 
 func checkForUpdate() tea.Msg {
 	return updateCheckMsg(ui.CheckUpdate())
 }
 
-func loadStats() tea.Msg {
-	return statsMsg{stats: ui.CountCertFiles()}
-}
-
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(checkForUpdate, loadStats)
+	return checkForUpdate
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -97,11 +82,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updateCheckMsg:
 		m.updateMsg = string(msg)
 		m.updateDone = true
-		return m, nil
-
-	case statsMsg:
-		m.stats = msg.stats
-		m.statsReady = true
 		return m, nil
 
 	case tea.KeyMsg:
@@ -209,6 +189,10 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 		m.screen = screenSub
 		m.sub = generate.NewSelfSigned()
 		return m, m.sub.Init()
+	case "update":
+		m.screen = screenSub
+		m.sub = update.New()
+		return m, m.sub.Init()
 	}
 	return m, nil
 }
@@ -232,10 +216,9 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Build menu lines
-	var menuLines []string
 	for _, item := range m.items {
 		if item.isSeparator {
-			menuLines = append(menuLines, fmt.Sprintf("  %s", ui.SeparatorStyle.Render(item.label)))
+			b.WriteString(fmt.Sprintf("  %s\n", ui.SeparatorStyle.Render(item.label)))
 			continue
 		}
 
@@ -248,43 +231,7 @@ func (m Model) View() string {
 
 		label := labelStyle.Render(fmt.Sprintf("%-20s", item.label))
 		desc := ui.DescStyle.Render(item.desc)
-		menuLines = append(menuLines, fmt.Sprintf("  %s%s %s", cursor, label, desc))
-	}
-
-	// Build sidebar
-	var sidebar []string
-	if m.statsReady {
-		sidebar = ui.FormatSidebar(m.stats)
-	}
-
-	// Render side by side if terminal is wide enough
-	termWidth := m.width
-	if termWidth == 0 {
-		termWidth = 120
-	}
-	sidebarBoxWidth := 25 // visual width of sidebar box
-	showSidebar := termWidth >= 85 && len(sidebar) > 0
-
-	// Column where sidebar starts
-	sidebarCol := termWidth - sidebarBoxWidth - 4
-
-	for i, line := range menuLines {
-		if showSidebar && i < len(sidebar) {
-			pad := sidebarCol - visWidth(line)
-			if pad < 2 {
-				pad = 2
-			}
-			b.WriteString(fmt.Sprintf("%s%*s%s\n", line, pad, "", ui.DimStyle.Render(sidebar[i])))
-		} else {
-			b.WriteString(line + "\n")
-		}
-	}
-
-	// Remaining sidebar lines if menu is shorter
-	if showSidebar {
-		for i := len(menuLines); i < len(sidebar); i++ {
-			b.WriteString(fmt.Sprintf("%*s%s\n", sidebarCol, "", ui.DimStyle.Render(sidebar[i])))
-		}
+		b.WriteString(fmt.Sprintf("  %s%s %s\n", cursor, label, desc))
 	}
 
 	b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  q / ctrl+c quit") + "\n")

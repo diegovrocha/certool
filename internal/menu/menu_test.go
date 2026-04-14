@@ -65,7 +65,7 @@ func TestMenuHasAllActions(t *testing.T) {
 
 	expectedActions := []string{
 		"pfx_pem", "pfx_cer_pem", "pfx_cer_der", "pfx_key", "pfx_repack",
-		"inspect", "verify_chain", "verify_key", "compare_hash", "gen_self", "quit",
+		"inspect", "verify_chain", "verify_key", "compare_hash", "gen_self", "update", "quit",
 	}
 
 	actions := make(map[string]bool)
