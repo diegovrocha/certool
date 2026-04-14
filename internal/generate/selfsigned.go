@@ -315,7 +315,7 @@ func (m *Model) View() string {
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("ENTER confirm/skip  esc back to menu") + "\n")
+	b.WriteString("\n  " + ui.DimStyle.Render("ENTER confirm/skip  esc back  ctrl+c quit") + "\n")
 	return b.String()
 }
 

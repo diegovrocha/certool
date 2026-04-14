@@ -272,9 +272,9 @@ func (m *Model) View() string {
 	}
 
 	if m.step == stepResult && m.err == "" {
-		b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ scroll  n inspect another  f toggle full view  esc back") + "\n")
+		b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ scroll  n inspect another  f toggle full view  esc back  ctrl+c quit") + "\n")
 	} else {
-		b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm") + "\n")
+		b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm  ctrl+c quit") + "\n")
 	}
 	return b.String()
 }

@@ -185,7 +185,7 @@ func (m *ChainModel) View() string {
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm") + "\n")
+	b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm  ctrl+c quit") + "\n")
 	return b.String()
 }
 
@@ -305,7 +305,7 @@ func (m *CertKeyModel) View() string {
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm") + "\n")
+	b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm  ctrl+c quit") + "\n")
 	return b.String()
 }
 
@@ -591,6 +591,6 @@ func (m *CompareHashModel) View() string {
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm") + "\n")
+	b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm  ctrl+c quit") + "\n")
 	return b.String()
 }

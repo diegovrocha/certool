@@ -137,10 +137,14 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSub(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "esc" {
+	switch msg.String() {
+	case "esc":
 		m.screen = screenMenu
 		m.sub = nil
 		return m, nil
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
 	}
 	if m.sub != nil {
 		var cmd tea.Cmd
@@ -283,7 +287,7 @@ func (m Model) View() string {
 		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  q quit") + "\n")
+	b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  q / ctrl+c quit") + "\n")
 
 	return b.String()
 }
