@@ -1,5 +1,10 @@
 # certool
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/diegovrocha/certool)](https://github.com/diegovrocha/certool/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/diegovrocha/certool/pulls)
+[![Go Report Card](https://goreportcard.com/badge/github.com/diegovrocha/certool)](https://goreportcard.com/report/github.com/diegovrocha/certool)
+
 ```
                 _              _
   ___ ___ _ __| |_ ___   ___ | |
@@ -11,6 +16,8 @@
 Digital certificate conversion, validation and generation TUI.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). Single binary, zero runtime dependencies — just `openssl`.
+
+**Contributions welcome!** See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Requirements
 
