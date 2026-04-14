@@ -20,6 +20,8 @@ const (
 	genOutCert
 	genOutKey
 	genCN
+	genSANPreset
+	genSANCustom
 	genOrg
 	genOU
 	genCountry
@@ -28,6 +30,15 @@ const (
 	genRunning
 	genDone
 )
+
+// SAN presets
+var sanPresetLabels = []string{
+	"None                    (just CN)",
+	"Web                     (CN + localhost + 127.0.0.1 + ::1)",
+	"Wildcard                (CN + *.CN)",
+	"Wildcard + Web          (CN + *.CN + localhost + 127.0.0.1 + ::1)",
+	"Custom                  (type your own list)",
+}
 
 type Model struct {
 	step    genStep
@@ -38,6 +49,8 @@ type Model struct {
 	outCert string
 	outKey  string
 	cn      string
+	sans    []string
+	sanDesc string // human description for the summary
 	org     string
 	ou      string
 	country string
@@ -85,6 +98,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				history.KV("cn", m.cn),
 				history.KV("days", m.days),
 				history.KV("bits", m.bits),
+				history.KV("sans", fmt.Sprintf("%d", len(m.sans))),
 				history.KV("output", m.outCert))
 		}
 		return m, nil
@@ -105,11 +119,12 @@ type genResult struct {
 
 func isInputStep(s genStep) bool {
 	return s == genCN || s == genOrg || s == genOU || s == genCountry ||
-		s == genState || s == genCity || s == genOutCert || s == genOutKey
+		s == genState || s == genCity || s == genOutCert || s == genOutKey ||
+		s == genSANCustom
 }
 
 func isChoiceStep(s genStep) bool {
-	return s == genDays || s == genBits
+	return s == genDays || s == genBits || s == genSANPreset
 }
 
 func choiceMax(s genStep) int {
@@ -118,6 +133,8 @@ func choiceMax(s genStep) int {
 		return 4 // 5 options (0-4)
 	case genBits:
 		return 1 // 2 options (0-1)
+	case genSANPreset:
+		return len(sanPresetLabels) - 1
 	}
 	return 0
 }
@@ -176,6 +193,61 @@ func (m *Model) advance() (tea.Model, tea.Cmd) {
 		if m.cn == "" {
 			return m, nil // CN is required
 		}
+		m.step = genSANPreset
+		m.optCur = 1 // default: Web preset (handy for dev)
+		return m, nil
+
+	case genSANPreset:
+		// Resolve the preset
+		switch m.optCur {
+		case 0: // None
+			m.sans = nil
+			m.sanDesc = "none"
+			m.step = genOrg
+			return m, m.newInput("ENTER to skip")
+		case 1: // Web
+			m.sans = []string{
+				"DNS:" + m.cn,
+				"DNS:localhost",
+				"IP:127.0.0.1",
+				"IP:::1",
+			}
+			m.sanDesc = "web"
+			m.step = genOrg
+			return m, m.newInput("ENTER to skip")
+		case 2: // Wildcard
+			m.sans = []string{
+				"DNS:" + m.cn,
+				"DNS:*." + m.cn,
+			}
+			m.sanDesc = "wildcard"
+			m.step = genOrg
+			return m, m.newInput("ENTER to skip")
+		case 3: // Wildcard + Web
+			m.sans = []string{
+				"DNS:" + m.cn,
+				"DNS:*." + m.cn,
+				"DNS:localhost",
+				"IP:127.0.0.1",
+				"IP:::1",
+			}
+			m.sanDesc = "wildcard+web"
+			m.step = genOrg
+			return m, m.newInput("ENTER to skip")
+		case 4: // Custom
+			m.step = genSANCustom
+			return m, m.newInput("DNS:a.com,DNS:*.a.com,IP:1.2.3.4,email:x@y")
+		}
+		return m, nil
+
+	case genSANCustom:
+		raw := strings.TrimSpace(m.input.Value())
+		m.sans = parseCustomSANs(raw)
+		if len(m.sans) > 0 {
+			m.sanDesc = fmt.Sprintf("custom (%d)", len(m.sans))
+		} else {
+			m.sanDesc = "none"
+		}
 		m.step = genOrg
 		return m, m.newInput("ENTER to skip")
 
@@ -230,20 +302,97 @@ func (m *Model) doGenerate() tea.Cmd {
 			subject += "/L=" + m.city
 		}
 
-		err := exec.Command("openssl", "req", "-x509",
-			"-newkey", "rsa:"+m.bits, "-nodes",
+		args := []string{
+			"req", "-x509",
+			"-newkey", "rsa:" + m.bits, "-nodes",
 			"-keyout", m.outKey, "-out", m.outCert,
-			"-days", m.days, "-subj", subject).Run()
+			"-days", m.days, "-subj", subject,
+		}
+		if len(m.sans) > 0 {
+			args = append(args, "-addext", "subjectAltName="+strings.Join(m.sans, ","))
+		}
 
+		err := exec.Command("openssl", args...).Run()
 		if err != nil {
 			return genResult{false, "Generation failed: " + err.Error()}
 		}
 
 		os.Chmod(m.outKey, 0600)
-		msg := fmt.Sprintf("Cert: %s\nKey:  %s\nCN: %s | %s days | RSA %s",
-			m.outCert, m.outKey, m.cn, m.days, m.bits)
+		sanInfo := ""
+		if len(m.sans) > 0 {
+			sanInfo = fmt.Sprintf("\nSANs: %d entries (%s)", len(m.sans), m.sanDesc)
+		}
+		msg := fmt.Sprintf("Cert: %s\nKey:  %s\nCN: %s | %s days | RSA %s%s",
+			m.outCert, m.outKey, m.cn, m.days, m.bits, sanInfo)
 		return genResult{true, msg}
 	}
+}
+
+// parseCustomSANs splits a comma-separated list and normalizes entries.
+// Accepts inputs like "a.com, DNS:b.com, IP:1.2.3.4, x@y.com" and prefixes
+// bare tokens as DNS:* or email:* when it can tell.
+func parseCustomSANs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		// Already has a known prefix?
+		lower := strings.ToLower(p)
+		if strings.HasPrefix(lower, "dns:") ||
+			strings.HasPrefix(lower, "ip:") ||
+			strings.HasPrefix(lower, "email:") ||
+			strings.HasPrefix(lower, "uri:") {
+			out = append(out, p)
+			continue
+		}
+		// Detect type by content
+		if strings.Contains(p, "@") {
+			out = append(out, "email:"+p)
+		} else if isIPish(p) {
+			out = append(out, "IP:"+p)
+		} else {
+			out = append(out, "DNS:"+p)
+		}
+	}
+	return out
+}
+
+// isIPish is a rough check: any string with a digit and a dot or colon.
+func isIPish(s string) bool {
+	hasDigit := false
+	hasSep := false
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			hasDigit = true
+		}
+		if r == '.' || r == ':' {
+			hasSep = true
+		}
+	}
+	return hasDigit && hasSep &&
+		!strings.ContainsAny(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") ||
+		// IPv6 hex letters: allow a-f only
+		isIPv6Hex(s)
+}
+
+func isIPv6Hex(s string) bool {
+	if !strings.Contains(s, ":") {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') ||
+			(r >= 'a' && r <= 'f') ||
+			(r >= 'A' && r <= 'F') ||
+			r == ':') {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Model) View() string {
@@ -290,6 +439,24 @@ func (m *Model) View() string {
 
 	case genCN:
 		b.WriteString("  Common Name (CN) " + ui.DimStyle.Render("— required") + ":\n\n")
+		b.WriteString("  " + m.input.View() + "\n")
+
+	case genSANPreset:
+		b.WriteString("  Subject Alternative Names (SAN):\n")
+		b.WriteString("  " + ui.DimStyle.Render("Modern browsers require SANs; CN alone is ignored") + "\n\n")
+		for i, label := range sanPresetLabels {
+			cursor := "  "
+			style := ui.InactiveStyle
+			if i == m.optCur {
+				cursor = ui.ActiveStyle.Render("➤ ")
+				style = ui.ActiveStyle
+			}
+			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(label)))
+		}
+
+	case genSANCustom:
+		b.WriteString("  Custom SANs " + ui.DimStyle.Render("— comma-separated") + ":\n")
+		b.WriteString("  " + ui.DimStyle.Render("accepts: DNS:a.com, IP:1.2.3.4, email:x@y  (bare names auto-detected)") + "\n\n")
 		b.WriteString("  " + m.input.View() + "\n")
 
 	case genOrg:
@@ -339,6 +506,7 @@ func (m *Model) viewSummary(b *strings.Builder) {
 		{"Cert", m.outCert, genOutCert},
 		{"Key", m.outKey, genOutKey},
 		{"CN", m.cn, genCN},
+		{"SANs", m.sanDesc, genSANPreset},
 		{"O", m.org, genOrg},
 		{"OU", m.ou, genOU},
 		{"C", m.country, genCountry},
