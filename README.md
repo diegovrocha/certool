@@ -86,11 +86,20 @@ make uninstall  # remove from /usr/local/bin
 - **Compare certs** — compare 2+ certificates by fingerprint, serial, subject and modulus. For 3+ certs shows a match matrix with identical-cert grouping. Supports PFX/PEM/DER (prompts for password on PFX). Press `d` in results for a side-by-side field-by-field diff with green (match) / red (differ) colors
 
 ### Generate
-- **Self-signed** — generate certificate + key for dev/testing. Configurable validity (30/90/365/730/3650 days), RSA key size (2048/4096) and optional subject fields (O, OU, C, ST, L)
+- **Self-signed** — generate certificate + key for dev/testing
+  - Configurable validity (30/90/365/730/3650 days)
+  - **RSA** (2048 / 4096 bits) or **EC** (P-256 / P-384 / P-521 — smaller keys, faster handshakes, TLS 1.3 default)
+  - **SANs** (Subject Alternative Names) with presets:
+    - *None* — just CN
+    - *Web* — CN + `localhost` + `127.0.0.1` + `::1` (ideal for local dev)
+    - *Wildcard* — CN + `*.CN`
+    - *Wildcard + Web* — both combined
+    - *Custom* — comma-separated list, auto-detects DNS/IP/email/URI
+  - Optional subject fields (O, OU, C, ST, L)
 
 ### Utilities
 - **History** — log of all operations stored in `~/.certui/history.log`, viewable from the menu
-- **Update** — in-app download and replace of the binary. Shows scrollable GitHub release notes / changelog before installing. Auto-detects new releases on launch and shows a notice in the banner
+- **Update** — in-app download and replace of the binary. Shows scrollable GitHub release notes before installing, then auto-restarts certui with the new version (3-second countdown, press `r` to restart immediately or `c` to cancel). Also auto-detects new releases on launch and shows a notice in the banner
 - **Quit**
 
 ### File picker
@@ -142,6 +151,25 @@ make uninstall  # remove from /usr/local/bin
 | Key | Action |
 |-----|--------|
 | `d` | Toggle side-by-side diff view |
+
+### Update
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Scroll changelog |
+| `Enter` | Install update (on confirm step) / Restart now (on success) |
+| `r` | Restart now after update |
+| `c` | Cancel auto-restart |
+
+## Docker (test on Linux)
+
+A `Dockerfile.test` is provided to try certui on Linux without installing anything locally:
+
+```bash
+docker build -t certui-test -f Dockerfile.test .
+docker run -it --rm -v $(pwd):/certs certui-test
+```
+
+The container mounts your current directory as `/certs` so certui can access local certificate files. Uses `debian:stable-slim` (~75 MB) and downloads the latest released binary automatically.
 
 ## Theme
 
