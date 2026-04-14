@@ -81,19 +81,21 @@ Each `release-*` target runs `go vet`, tests, tags and pushes. GitHub Actions th
 
 ## Features
 
+The menu is ordered by typical usage frequency: Validate → Convert → Generate.
+
+### Validate
+- **Inspect** — view certificate details (CN, issuer, validity, SANs, key usage...). Press `f` for full view with Authority Key ID, OCSP, CRL, policies and signature. Press `y` to copy details to clipboard, `s` to save as `.txt`, `n` to inspect another
+- **Batch inspect** — browse directories and scan any folder for all certificates. Shows a table with status (valid / expiring / expired), sortable by name (`c`), expiry date (`d`), or days remaining (`r`). Press `Enter` on any row to see full details, `b` to go back to folder browser
+- **Compare certs** — compare 2+ certificates by fingerprint, serial, subject and modulus. For 3+ certs shows a match matrix with identical-cert grouping. Supports PFX/PEM/DER (prompts for password on PFX). Press `d` in results for a side-by-side field-by-field diff with green (match) / red (differ) colors
+- **Download from URL** — fetch certificate from `host:port` via `openssl s_client`, shows TLS version, cipher and full chain. Press `s` to save the chain as `.pem`
+- **Verify chain** — validate cert → intermediate CA → root CA (system CA or custom)
+- **Verify cert+key** — check if certificate matches private key (RSA or EC)
+
 ### Convert
 - **PFX/P12 → PEM** — certificate + key as text
 - **PFX/P12 → CER** — certificate only, PEM (text) or DER (binary)
 - **PFX/P12 → KEY** — private key only
 - **PFX/P12 → P12** — repack `--legacy` → modern cipher (AES-256-CBC)
-
-### Validate
-- **Inspect** — view certificate details (CN, issuer, validity, SANs, key usage...). Press `f` for full view with Authority Key ID, OCSP, CRL, policies and signature. Press `y` to copy details to clipboard, `s` to save as `.txt`, `n` to inspect another
-- **Batch inspect** — browse directories and scan any folder for all certificates. Shows a table with status (valid / expiring / expired), sortable by name (`c`), expiry date (`d`), or days remaining (`r`). Press `Enter` on any row to see full details, `b` to go back to folder browser
-- **Download from URL** — fetch certificate from `host:port` via `openssl s_client`, shows TLS version, cipher and full chain. Press `s` to save the chain as `.pem`
-- **Verify chain** — validate cert → intermediate CA → root CA (system CA or custom)
-- **Verify cert+key** — check if certificate matches private key (RSA or EC)
-- **Compare certs** — compare 2+ certificates by fingerprint, serial, subject and modulus. For 3+ certs shows a match matrix with identical-cert grouping. Supports PFX/PEM/DER (prompts for password on PFX). Press `d` in results for a side-by-side field-by-field diff with green (match) / red (differ) colors
 
 ### Generate
 - **Self-signed** — generate certificate + key for dev/testing
