@@ -6,11 +6,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/diegovrocha/certui)](https://goreportcard.com/report/github.com/diegovrocha/certui)
 
 ```
-                _        _
-  ___ ___ _ __| |_ _   _(_)
- / __/ _ \ '__| __| | | | |
-| (_|  __/ |  | |_| |_| | |
- \___\___|_|   \__|\__,_|_|
+  ____         _____ _   _ ___
+ / ___|___ _ _|_   _| | | |_ _|
+| |   / _ \ '__|| | | | | || |
+| |__|  __/ |   | | | |_| || |
+ \____\___|_|   |_|  \___/|___|
 ```
 
 Digital certificate conversion, validation and generation TUI.
