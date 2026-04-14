@@ -161,6 +161,16 @@ func (fp FilePicker) Update(msg tea.Msg) (FilePicker, tea.Cmd) {
 				fp.loadDir()
 			}
 			return fp, nil
+		case "right":
+			// Enter highlighted directory (right-arrow shortcut)
+			if len(fp.filtered) > 0 {
+				entry := fp.filtered[fp.cursor]
+				if entry.isDir {
+					fp.cwd = entry.path
+					fp.loadDir()
+				}
+			}
+			return fp, nil
 		case "enter":
 			if len(fp.filtered) == 0 {
 				return fp, nil
@@ -275,7 +285,7 @@ func (fp FilePicker) View() string {
 		}
 	}
 	b.WriteString(fmt.Sprintf("\n  %s\n", DimStyle.Render(fmt.Sprintf("%d files, %d folders", nFiles, nDirs))))
-	b.WriteString("  " + DimStyle.Render("← parent  enter open/select") + "\n")
+	b.WriteString("  " + DimStyle.Render("←/→ parent/enter folder  enter open/select") + "\n")
 
 	return b.String()
 }

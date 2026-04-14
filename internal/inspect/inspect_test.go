@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestExtractCN(t *testing.T) {
@@ -164,6 +166,81 @@ func TestHasPEMMarker(t *testing.T) {
 	os.WriteFile(derFile, []byte{0x30, 0x82, 0x01}, 0644)
 	if hasPEMMarker(derFile) {
 		t.Error("hasPEMMarker should return false for DER")
+	}
+}
+
+func TestNewWithFile(t *testing.T) {
+	// Non-PFX file: should set pendingInspect and advance to stepResult
+	m := NewWithFile("/tmp/example.pem")
+	mm := m.(*Model)
+	if !mm.pendingInspect {
+		t.Error("NewWithFile(.pem) should set pendingInspect=true")
+	}
+	if mm.step != stepResult {
+		t.Errorf("NewWithFile(.pem) step: got %v, want stepResult", mm.step)
+	}
+	if mm.infile != "/tmp/example.pem" {
+		t.Errorf("infile: got %q", mm.infile)
+	}
+
+	// After Init(), pendingInspect flips back to false (and returns a cmd)
+	cmd := mm.Init()
+	if cmd == nil {
+		t.Error("Init on pending should return a command")
+	}
+	if mm.pendingInspect {
+		t.Error("Init should consume pendingInspect")
+	}
+
+	// PFX file: should go to stepPassword, needPass=true
+	m2 := NewWithFile("/tmp/example.pfx")
+	mm2 := m2.(*Model)
+	if !mm2.needPass {
+		t.Error("NewWithFile(.pfx) should set needPass=true")
+	}
+	if mm2.step != stepPassword {
+		t.Errorf("NewWithFile(.pfx) step: got %v want stepPassword", mm2.step)
+	}
+	if mm2.pendingInspect {
+		t.Error("NewWithFile(.pfx) should not set pendingInspect")
+	}
+}
+
+func TestExtractCNAllFormats(t *testing.T) {
+	tests := []struct {
+		subject  string
+		expected string
+	}{
+		{"CN=just-cn", "just-cn"},
+		// Multiple CN= in different RDNs; first match wins
+		{"CN=first.com, O=Org", "first.com"},
+		// CN value containing "CN=" substring should not be mis-parsed
+		// (extractCN splits on commas then strips CN= prefix)
+		{"O=Org, CN=has-CN=inside", "has-CN=inside"},
+		// Leading space handling
+		{" CN =spaced ", "spaced"},
+		// No CN at all returns the raw subject
+		{"O=Org, C=US", "O=Org, C=US"},
+	}
+	for _, tt := range tests {
+		if got := extractCN(tt.subject); got != tt.expected {
+			t.Errorf("extractCN(%q) = %q, want %q", tt.subject, got, tt.expected)
+		}
+	}
+}
+
+func TestInspectSaveModeToggle(t *testing.T) {
+	// Set up a model as if inspection succeeded.
+	m := &Model{
+		step: stepResult,
+		certs: []CertInfo{{CN: "test.com"}},
+	}
+	// Press 's' to enter save mode.
+	keyS := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+	next, _ := m.Update(keyS)
+	mm := next.(*Model)
+	if !mm.saving {
+		t.Error("pressing 's' should set saving=true")
 	}
 }
 

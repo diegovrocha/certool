@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/ui"
 )
 
@@ -49,6 +50,15 @@ func (m *ChainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.success = msg.success
 		m.result = msg.message
 		m.step = chainResult
+		result := "mismatch"
+		if msg.success {
+			result = "match"
+		}
+		history.Log("verify_chain",
+			history.KV("cert", m.certFile),
+			history.KV("intermediate", m.intFile),
+			history.KV("ca", m.caFile),
+			history.KV("result", result))
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
@@ -223,6 +233,14 @@ func (m *CertKeyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.match = msg.success
 		m.result = msg.message
 		m.step = ckResult
+		result := "mismatch"
+		if msg.success {
+			result = "match"
+		}
+		history.Log("verify_cert_key",
+			history.KV("cert", m.certFile),
+			history.KV("key", m.keyFile),
+			history.KV("result", result))
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
@@ -318,7 +336,12 @@ const (
 	cmpPass1
 	cmpSelectFile2
 	cmpPass2
+	cmpAskAnother
+	cmpSelectFileN
+	cmpPassN
 	cmpResultStep
+	cmpDiffView
+	cmpMatrixView
 )
 
 type certField struct {
@@ -328,19 +351,42 @@ type certField struct {
 	match  bool
 }
 
+// certSummary holds all resolved field values for one certificate.
+type certSummary struct {
+	file        string
+	pem         string // resolved PEM path (temp file if PFX)
+	fingerprint string
+	serial      string
+	subject     string
+	issuer      string
+	cn          string
+	notBefore   string
+	notAfter    string
+	modulus     string
+}
+
 type CompareHashModel struct {
-	step   cmpStep
-	picker ui.FilePicker
-	input  textinput.Model
-	file1  string
-	file2  string
-	pass1  string
-	pass2  string
-	pem1   string // resolved PEM path (temp file if PFX)
-	pem2   string
-	match  bool
-	fields []certField
-	err    string
+	step    cmpStep
+	picker  ui.FilePicker
+	input   textinput.Model
+	file1   string
+	file2   string
+	pass1   string
+	pass2   string
+	pem1    string // resolved PEM path (temp file if PFX)
+	pem2    string
+	match   bool
+	fields  []certField
+	err     string
+
+	// Multi-cert support
+	files    []string // all file paths collected (>=2)
+	pems     []string // resolved PEM paths
+	pendingFile string
+	optCur   int
+	summaries []certSummary
+	matrix    [][]bool // matrix[i][j] true when cert i fingerprint == cert j fingerprint
+	groups    [][]int  // groups of identical cert indices (by fingerprint)
 }
 
 func NewCompareHash() tea.Model {
@@ -364,15 +410,52 @@ func (m *CompareHashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fields = msg.fields
 		m.err = msg.err
 		m.step = cmpResultStep
+		if msg.err == "" {
+			result := "mismatch"
+			if msg.match {
+				result = "match"
+			}
+			history.Log("compare_certs",
+				history.KV("file1", m.file1),
+				history.KV("file2", m.file2),
+				history.KV("result", result))
+		}
+		return m, nil
+	case multiCompareResult:
+		m.summaries = msg.summaries
+		m.matrix = msg.matrix
+		m.groups = msg.groups
+		m.err = msg.err
+		m.step = cmpMatrixView
+		if msg.err == "" {
+			files := make([]string, len(m.files))
+			copy(files, m.files)
+			history.Log("compare_certs_multi",
+				history.KV("count", fmt.Sprintf("%d", len(files))),
+				history.KV("files", strings.Join(files, ",")),
+				history.KV("groups", fmt.Sprintf("%d", len(msg.groups))))
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
+			if m.step == cmpDiffView {
+				m.step = cmpResultStep
+				return m, nil
+			}
 			return m, nil
+		}
+		// Result-screen hotkeys
+		if m.step == cmpResultStep && m.err == "" {
+			switch msg.String() {
+			case "d", "D":
+				m.step = cmpDiffView
+				return m, nil
+			}
 		}
 	}
 
 	switch m.step {
-	case cmpSelectFile1, cmpSelectFile2:
+	case cmpSelectFile1, cmpSelectFile2, cmpSelectFileN:
 		var cmd tea.Cmd
 		m.picker, cmd = m.picker.Update(msg)
 		if m.picker.Done {
@@ -388,6 +471,8 @@ func (m *CompareHashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.input.Focus()
 				}
 				m.pem1 = m.file1
+				m.files = []string{m.file1}
+				m.pems = []string{m.pem1}
 				m.step = cmpSelectFile2
 				m.picker = ui.NewCertFilePicker("Select the second certificate")
 			case cmpSelectFile2:
@@ -401,10 +486,65 @@ func (m *CompareHashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.input.Focus()
 				}
 				m.pem2 = m.file2
-				return m, m.doCompare()
+				m.files = append(m.files, m.file2)
+				m.pems = append(m.pems, m.pem2)
+				m.step = cmpAskAnother
+				m.optCur = 1 // default "No"
+				return m, nil
+			case cmpSelectFileN:
+				m.pendingFile = m.picker.Selected
+				if isPFX(m.pendingFile) {
+					m.step = cmpPassN
+					m.input = textinput.New()
+					m.input.Placeholder = "PFX/P12 password"
+					m.input.EchoMode = textinput.EchoPassword
+					m.input.Focus()
+					return m, m.input.Focus()
+				}
+				m.files = append(m.files, m.pendingFile)
+				m.pems = append(m.pems, m.pendingFile)
+				m.pendingFile = ""
+				m.step = cmpAskAnother
+				m.optCur = 1
+				return m, nil
 			}
 		}
 		return m, cmd
+
+	case cmpAskAnother:
+		if k, ok := msg.(tea.KeyMsg); ok {
+			switch k.String() {
+			case "up", "k":
+				if m.optCur > 0 {
+					m.optCur--
+				}
+			case "down", "j":
+				if m.optCur < 1 {
+					m.optCur++
+				}
+			case "y", "Y":
+				m.optCur = 0
+				m.step = cmpSelectFileN
+				m.picker = ui.NewCertFilePicker(fmt.Sprintf("Select certificate #%d", len(m.files)+1))
+				return m, nil
+			case "n", "N":
+				if len(m.files) >= 3 {
+					return m, m.doMultiCompare()
+				}
+				return m, m.doCompare()
+			case "enter":
+				if m.optCur == 0 { // Yes
+					m.step = cmpSelectFileN
+					m.picker = ui.NewCertFilePicker(fmt.Sprintf("Select certificate #%d", len(m.files)+1))
+					return m, nil
+				}
+				if len(m.files) >= 3 {
+					return m, m.doMultiCompare()
+				}
+				return m, m.doCompare()
+			}
+		}
+		return m, nil
 
 	case cmpPass1:
 		if k, ok := msg.(tea.KeyMsg); ok && k.String() == "enter" {
@@ -416,6 +556,8 @@ func (m *CompareHashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.pem1 = tmp
+			m.files = []string{m.file1}
+			m.pems = []string{m.pem1}
 			m.step = cmpSelectFile2
 			m.picker = ui.NewCertFilePicker("Select the second certificate")
 			return m, nil
@@ -434,7 +576,30 @@ func (m *CompareHashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.pem2 = tmp
-			return m, m.doCompare()
+			m.files = append(m.files, m.file2)
+			m.pems = append(m.pems, m.pem2)
+			m.step = cmpAskAnother
+			m.optCur = 1
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+
+	case cmpPassN:
+		if k, ok := msg.(tea.KeyMsg); ok && k.String() == "enter" {
+			tmp, err := extractPFXtoPEM(m.pendingFile, m.input.Value())
+			if err != "" {
+				m.err = err
+				m.step = cmpResultStep
+				return m, nil
+			}
+			m.files = append(m.files, m.pendingFile)
+			m.pems = append(m.pems, tmp)
+			m.pendingFile = ""
+			m.step = cmpAskAnother
+			m.optCur = 1
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -448,6 +613,90 @@ type compareResult struct {
 	match  bool
 	fields []certField
 	err    string
+}
+
+type multiCompareResult struct {
+	summaries []certSummary
+	matrix    [][]bool
+	groups    [][]int
+	err       string
+}
+
+func loadSummary(file, pem string) certSummary {
+	fp := certField2(pem, "-fingerprint", "")
+	if idx := strings.Index(fp, "="); idx >= 0 {
+		fp = fp[idx+1:]
+	}
+	sub := certField2(pem, "-subject", "subject=")
+	iss := certField2(pem, "-issuer", "issuer=")
+	ser := certField2(pem, "-serial", "serial=")
+	nb := certField2(pem, "-startdate", "notBefore=")
+	na := certField2(pem, "-enddate", "notAfter=")
+	mod := certField2(pem, "-modulus", "Modulus=")
+	cn := sub
+	for _, part := range strings.Split(sub, ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "CN=") || strings.HasPrefix(part, "CN =") {
+			cn = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(part, "CN="), "CN ="))
+			break
+		}
+	}
+	return certSummary{
+		file: file, pem: pem, fingerprint: fp, serial: ser,
+		subject: sub, issuer: iss, cn: cn, notBefore: nb, notAfter: na,
+		modulus: mod,
+	}
+}
+
+func (m *CompareHashModel) doMultiCompare() tea.Cmd {
+	files := make([]string, len(m.files))
+	copy(files, m.files)
+	pems := make([]string, len(m.pems))
+	copy(pems, m.pems)
+
+	return func() tea.Msg {
+		n := len(files)
+		sums := make([]certSummary, n)
+		for i := 0; i < n; i++ {
+			sums[i] = loadSummary(files[i], pems[i])
+			if sums[i].fingerprint == "" {
+				// Cleanup temp files
+				for _, p := range pems {
+					if strings.HasPrefix(p, "/tmp/certui_cmp_") {
+						exec.Command("rm", "-f", p).Run()
+					}
+				}
+				return multiCompareResult{err: fmt.Sprintf("Cannot read certificate: %s", files[i])}
+			}
+		}
+		matrix := make([][]bool, n)
+		for i := 0; i < n; i++ {
+			matrix[i] = make([]bool, n)
+			for j := 0; j < n; j++ {
+				matrix[i][j] = sums[i].fingerprint == sums[j].fingerprint
+			}
+		}
+		// Group identical certs by fingerprint
+		fpGroup := map[string][]int{}
+		order := []string{}
+		for i, s := range sums {
+			if _, ok := fpGroup[s.fingerprint]; !ok {
+				order = append(order, s.fingerprint)
+			}
+			fpGroup[s.fingerprint] = append(fpGroup[s.fingerprint], i)
+		}
+		var groups [][]int
+		for _, fp := range order {
+			groups = append(groups, fpGroup[fp])
+		}
+		// Cleanup temp files
+		for _, p := range pems {
+			if strings.HasPrefix(p, "/tmp/certui_cmp_") {
+				exec.Command("rm", "-f", p).Run()
+			}
+		}
+		return multiCompareResult{summaries: sums, matrix: matrix, groups: groups}
+	}
 }
 
 func extractPFXtoPEM(file, password string) (pemPath string, errMsg string) {
@@ -486,56 +735,54 @@ func certField2(file, flag, prefix string) string {
 }
 
 func (m *CompareHashModel) doCompare() tea.Cmd {
+	pem1 := m.pem1
+	pem2 := m.pem2
+	file1 := m.file1
+	file2 := m.file2
+	// Store summaries for diff view access
+	m.summaries = nil
+
 	return func() tea.Msg {
-		f1 := m.pem1
-		f2 := m.pem2
+		s1 := loadSummary(file1, pem1)
+		s2 := loadSummary(file2, pem2)
 
-		fp1 := certField2(f1, "-fingerprint", "")
-		fp2 := certField2(f2, "-fingerprint", "")
-		// Extract just the hash after "="
-		if idx := strings.Index(fp1, "="); idx >= 0 { fp1 = fp1[idx+1:] }
-		if idx := strings.Index(fp2, "="); idx >= 0 { fp2 = fp2[idx+1:] }
-
-		if fp1 == "" {
-			return compareResult{err: fmt.Sprintf("Cannot read certificate: %s", m.file1)}
+		if s1.fingerprint == "" {
+			return compareResult{err: fmt.Sprintf("Cannot read certificate: %s", file1)}
 		}
-		if fp2 == "" {
-			return compareResult{err: fmt.Sprintf("Cannot read certificate: %s", m.file2)}
+		if s2.fingerprint == "" {
+			return compareResult{err: fmt.Sprintf("Cannot read certificate: %s", file2)}
 		}
-
-		sub1 := certField2(f1, "-subject", "subject=")
-		sub2 := certField2(f2, "-subject", "subject=")
-		ser1 := certField2(f1, "-serial", "serial=")
-		ser2 := certField2(f2, "-serial", "serial=")
-		exp1 := certField2(f1, "-enddate", "notAfter=")
-		exp2 := certField2(f2, "-enddate", "notAfter=")
-
-		mod1 := certField2(f1, "-modulus", "Modulus=")
-		mod2 := certField2(f2, "-modulus", "Modulus=")
 
 		fields := []certField{
-			{"Fingerprint", fp1, fp2, fp1 == fp2},
-			{"Serial", ser1, ser2, ser1 == ser2},
-			{"Subject", sub1, sub2, sub1 == sub2},
-			{"Expires", exp1, exp2, exp1 == exp2},
+			{"CN", s1.cn, s2.cn, s1.cn == s2.cn},
+			{"Fingerprint", s1.fingerprint, s2.fingerprint, s1.fingerprint == s2.fingerprint},
+			{"Serial", s1.serial, s2.serial, s1.serial == s2.serial},
+			{"Subject", s1.subject, s2.subject, s1.subject == s2.subject},
+			{"Issuer", s1.issuer, s2.issuer, s1.issuer == s2.issuer},
+			{"Valid from", s1.notBefore, s2.notBefore, s1.notBefore == s2.notBefore},
+			{"Valid until", s1.notAfter, s2.notAfter, s1.notAfter == s2.notAfter},
 		}
 
-		if mod1 != "" && mod2 != "" {
-			short1, short2 := mod1, mod2
-			if len(short1) > 40 { short1 = short1[:40] + "..." }
-			if len(short2) > 40 { short2 = short2[:40] + "..." }
-			fields = append(fields, certField{"Modulus (RSA)", short1, short2, mod1 == mod2})
+		if s1.modulus != "" && s2.modulus != "" {
+			short1, short2 := s1.modulus, s2.modulus
+			if len(short1) > 40 {
+				short1 = short1[:40] + "..."
+			}
+			if len(short2) > 40 {
+				short2 = short2[:40] + "..."
+			}
+			fields = append(fields, certField{"Modulus (RSA)", short1, short2, s1.modulus == s2.modulus})
 		}
 
 		// Cleanup temp files
-		if strings.HasPrefix(m.pem1, "/tmp/certui_cmp_") {
-			exec.Command("rm", "-f", m.pem1).Run()
+		if strings.HasPrefix(pem1, "/tmp/certui_cmp_") {
+			exec.Command("rm", "-f", pem1).Run()
 		}
-		if strings.HasPrefix(m.pem2, "/tmp/certui_cmp_") {
-			exec.Command("rm", "-f", m.pem2).Run()
+		if strings.HasPrefix(pem2, "/tmp/certui_cmp_") {
+			exec.Command("rm", "-f", pem2).Run()
 		}
 
-		return compareResult{match: fp1 == fp2, fields: fields}
+		return compareResult{match: s1.fingerprint == s2.fingerprint, fields: fields}
 	}
 }
 
@@ -564,6 +811,36 @@ func (m *CompareHashModel) View() string {
 		b.WriteString("  🔑 PFX/P12 password:\n\n")
 		b.WriteString("  " + m.input.View() + "\n")
 
+	case cmpAskAnother:
+		for i, f := range m.files {
+			b.WriteString(fmt.Sprintf("  File %d: %s\n", i+1, ui.ActiveStyle.Render(f)))
+		}
+		b.WriteString("\n  Add another certificate?\n\n")
+		for i, o := range []string{"Yes", "No"} {
+			cursor := "  "
+			style := ui.InactiveStyle
+			if i == m.optCur {
+				cursor = ui.ActiveStyle.Render("➤ ")
+				style = ui.ActiveStyle
+			}
+			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, style.Render(o)))
+		}
+
+	case cmpSelectFileN:
+		for i, f := range m.files {
+			b.WriteString(fmt.Sprintf("  File %d: %s\n", i+1, ui.ActiveStyle.Render(f)))
+		}
+		b.WriteString("\n")
+		b.WriteString(m.picker.View())
+
+	case cmpPassN:
+		for i, f := range m.files {
+			b.WriteString(fmt.Sprintf("  File %d: %s\n", i+1, ui.ActiveStyle.Render(f)))
+		}
+		b.WriteString(fmt.Sprintf("  Pending: %s\n\n", ui.ActiveStyle.Render(m.pendingFile)))
+		b.WriteString("  🔑 PFX/P12 password:\n\n")
+		b.WriteString("  " + m.input.View() + "\n")
+
 	case cmpResultStep:
 		if m.err != "" {
 			b.WriteString(ui.ResultBox(false, "Error", m.err))
@@ -589,8 +866,124 @@ func (m *CompareHashModel) View() string {
 				b.WriteString("  " + ui.ErrorStyle.Render("✖ Different certificates") + "\n")
 			}
 		}
+
+	case cmpDiffView:
+		b.WriteString("  " + ui.TitleStyle.Render("Side-by-side diff") + "\n\n")
+		b.WriteString(fmt.Sprintf("  File 1: %s\n", ui.ActiveStyle.Render(m.file1)))
+		b.WriteString(fmt.Sprintf("  File 2: %s\n\n", ui.ActiveStyle.Render(m.file2)))
+
+		// Column widths
+		labelW := 14
+		colW := 40
+		border := strings.Repeat("─", colW)
+		b.WriteString(fmt.Sprintf("  %-*s │ %-*s │ %-*s\n",
+			labelW, "Field", colW, "File 1", colW, "File 2"))
+		b.WriteString(fmt.Sprintf("  %s─┼─%s─┼─%s\n",
+			strings.Repeat("─", labelW), border, border))
+		for _, f := range m.fields {
+			v1 := truncate(f.val1, colW)
+			v2 := truncate(f.val2, colW)
+			mark := ui.SuccessStyle.Render("✔")
+			style1 := ui.SuccessStyle
+			style2 := ui.SuccessStyle
+			if !f.match {
+				mark = ui.ErrorStyle.Render("✖")
+				style1 = ui.ErrorStyle
+				style2 = ui.ErrorStyle
+			}
+			b.WriteString(fmt.Sprintf("  %-*s │ %s │ %s  %s\n",
+				labelW, f.label,
+				style1.Render(fmt.Sprintf("%-*s", colW, v1)),
+				style2.Render(fmt.Sprintf("%-*s", colW, v2)),
+				mark))
+		}
+
+	case cmpMatrixView:
+		if m.err != "" {
+			b.WriteString(ui.ResultBox(false, "Error", m.err))
+			break
+		}
+		n := len(m.summaries)
+		b.WriteString("  " + ui.TitleStyle.Render(fmt.Sprintf("Comparing %d certificates", n)) + "\n\n")
+
+		// Header row
+		b.WriteString(fmt.Sprintf("  %-10s", " "))
+		for i := 0; i < n; i++ {
+			b.WriteString(fmt.Sprintf(" │ %-7s", fmt.Sprintf("File %d", i+1)))
+		}
+		b.WriteString("\n  ")
+		b.WriteString(strings.Repeat("─", 10))
+		for i := 0; i < n; i++ {
+			b.WriteString("─┼─" + strings.Repeat("─", 7))
+		}
+		b.WriteString("\n")
+
+		for i := 0; i < n; i++ {
+			b.WriteString(fmt.Sprintf("  %-10s", fmt.Sprintf("File %d", i+1)))
+			for j := 0; j < n; j++ {
+				var cell string
+				if i == j {
+					cell = ui.DimStyle.Render("   -   ")
+				} else if m.matrix[i][j] {
+					cell = ui.SuccessStyle.Render("   ✔   ")
+				} else {
+					cell = ui.ErrorStyle.Render("   ✖   ")
+				}
+				b.WriteString(" │ " + cell)
+			}
+			b.WriteString("\n")
+		}
+
+		b.WriteString("\n")
+		for i, s := range m.summaries {
+			b.WriteString(fmt.Sprintf("  File %d: %s  %s\n", i+1, ui.ActiveStyle.Render(s.file), ui.DimStyle.Render("("+s.cn+")")))
+		}
+
+		// Groups of identical certs
+		b.WriteString("\n")
+		for gi, g := range m.groups {
+			if len(g) >= 3 {
+				names := make([]string, len(g))
+				for k, idx := range g {
+					names[k] = fmt.Sprintf("File %d", idx+1)
+				}
+				b.WriteString("  " + ui.SuccessStyle.Render(fmt.Sprintf("✔ All match: %s", strings.Join(names, ", "))) + "\n")
+			} else if len(g) == 2 {
+				b.WriteString("  " + ui.SuccessStyle.Render(fmt.Sprintf("✔ Group %d: File %d and File %d identical", gi+1, g[0]+1, g[1]+1)) + "\n")
+			}
+		}
+		if len(m.groups) == n {
+			b.WriteString("  " + ui.ErrorStyle.Render("✖ All certificates differ") + "\n")
+		}
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm  ctrl+c quit") + "\n")
+	// Footer varies by step
+	switch m.step {
+	case cmpResultStep:
+		if m.err == "" {
+			b.WriteString("\n  " + ui.DimStyle.Render("d diff view  esc back  ctrl+c quit") + "\n")
+		} else {
+			b.WriteString("\n  " + ui.DimStyle.Render("esc back  ctrl+c quit") + "\n")
+		}
+	case cmpDiffView:
+		b.WriteString("\n  " + ui.DimStyle.Render("esc back  ctrl+c quit") + "\n")
+	case cmpAskAnother:
+		b.WriteString("\n  " + ui.DimStyle.Render("y add  n compare  ↑/↓ enter  esc back  ctrl+c quit") + "\n")
+	case cmpMatrixView:
+		b.WriteString("\n  " + ui.DimStyle.Render("esc back  ctrl+c quit") + "\n")
+	default:
+		b.WriteString("\n  " + ui.DimStyle.Render("esc back  enter confirm  ctrl+c quit") + "\n")
+	}
 	return b.String()
+}
+
+// truncate returns s limited to n runes, adding an ellipsis if shortened.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n <= 3 {
+		return s[:n]
+	}
+	return s[:n-3] + "..."
 }

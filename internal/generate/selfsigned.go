@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/ui"
 )
 
@@ -79,6 +80,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.success = msg.success
 		m.result = msg.message
 		m.step = genDone
+		if msg.success {
+			history.Log("generate_self_signed",
+				history.KV("cn", m.cn),
+				history.KV("days", m.days),
+				history.KV("bits", m.bits),
+				history.KV("output", m.outCert))
+		}
 		return m, nil
 	}
 

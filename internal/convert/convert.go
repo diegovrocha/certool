@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/ui"
 )
 
@@ -71,6 +72,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.success = msg.success
 		m.result = msg.message
 		m.step = stepDone
+		if msg.success {
+			history.Log("convert",
+				history.KV("op", convTypeName(m.convType)),
+				history.KV("input", m.infile),
+				history.KV("output", m.outfile))
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
@@ -271,4 +278,20 @@ func detectLegacy() []string {
 
 func runOpenSSL(args ...string) error {
 	return exec.Command("openssl", args...).Run()
+}
+
+func convTypeName(ct convType) string {
+	switch ct {
+	case typePfxPem:
+		return "pfx_to_pem"
+	case typePfxCerPem:
+		return "pfx_to_cer_pem"
+	case typePfxCerDer:
+		return "pfx_to_cer_der"
+	case typePfxKey:
+		return "pfx_to_key"
+	case typePfxRepack:
+		return "pfx_repack"
+	}
+	return "unknown"
 }

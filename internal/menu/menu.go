@@ -5,9 +5,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/diegovrocha/certui/internal/batch"
 	"github.com/diegovrocha/certui/internal/convert"
 	"github.com/diegovrocha/certui/internal/generate"
+	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/inspect"
+	"github.com/diegovrocha/certui/internal/remote"
 	"github.com/diegovrocha/certui/internal/ui"
 	"github.com/diegovrocha/certui/internal/update"
 	"github.com/diegovrocha/certui/internal/verify"
@@ -37,6 +40,10 @@ type Model struct {
 	quitting   bool
 	updateMsg  string
 	updateDone bool
+
+	// Fuzzy filter state (main menu only)
+	filterMode bool
+	filterText string
 }
 
 func New() Model {
@@ -49,12 +56,15 @@ func New() Model {
 		{label: "PFX/P12 → P12", desc: "repack --legacy → modern", action: "pfx_repack"},
 		{label: "── VALIDATE ─────────────────────────────────────", isSeparator: true},
 		{label: "Inspect", desc: "subject, validity, issuer...", action: "inspect"},
+		{label: "Download from URL", desc: "fetch cert from server (TLS)", action: "remote"},
+		{label: "Batch inspect", desc: "scan folder for all certs", action: "batch_inspect"},
 		{label: "Verify chain", desc: "validate cert → CA → root", action: "verify_chain"},
 		{label: "Verify cert+key", desc: "check if cert matches key", action: "verify_key"},
 		{label: "Compare certs", desc: "check if two certs are the same", action: "compare_hash"},
 		{label: "── GENERATE ─────────────────────────────────────", isSeparator: true},
 		{label: "Generate self-signed", desc: "create cert + key for dev/testing", action: "gen_self"},
 		{label: "─────────────────────────────────────────────────", isSeparator: true},
+		{label: "History", desc: "view recent operations log", action: "history"},
 		{label: "Update", desc: "download and install the latest version", action: "update"},
 		{label: "Quit", action: "quit"},
 	}
@@ -101,11 +111,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	if m.filterMode {
+		switch key {
+		case "esc":
+			m.filterMode = false
+			m.filterText = ""
+			m.resetCursor()
+			return m, nil
+		case "enter":
+			visible := m.visibleIndices()
+			if len(visible) == 0 {
+				return m, nil
+			}
+			action := m.items[m.cursor].action
+			if action == "" || m.items[m.cursor].isSeparator {
+				return m, nil
+			}
+			return m.handleAction(action)
+		case "up":
+			m.moveCursorFiltered(-1)
+			return m, nil
+		case "down":
+			m.moveCursorFiltered(1)
+			return m, nil
+		case "backspace":
+			if len(m.filterText) > 0 {
+				m.filterText = m.filterText[:len(m.filterText)-1]
+			}
+			m.snapCursorToFirstMatch()
+			return m, nil
+		case "/":
+			// Toggle off only when filter is empty.
+			if m.filterText == "" {
+				m.filterMode = false
+				m.resetCursor()
+			}
+			return m, nil
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+		case " ", "space":
+			m.filterText += " "
+			m.snapCursorToFirstMatch()
+			return m, nil
+		}
+		// Accept printable single-rune keys as filter input.
+		if len(msg.Runes) == 1 {
+			r := msg.Runes[0]
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '_' {
+				m.filterText += string(r)
+				m.snapCursorToFirstMatch()
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+
+	switch key {
 	case "up", "k":
 		m.moveCursor(-1)
 	case "down", "j":
 		m.moveCursor(1)
+	case "/":
+		m.filterMode = true
+		m.filterText = ""
+		m.snapCursorToFirstMatch()
+		return m, nil
 	case "q", "ctrl+c":
 		m.quitting = true
 		return m, tea.Quit
@@ -144,6 +217,63 @@ func (m *Model) moveCursor(delta int) {
 	}
 }
 
+// moveCursorFiltered moves the cursor within currently matching items.
+func (m *Model) moveCursorFiltered(delta int) {
+	visible := m.visibleIndices()
+	if len(visible) == 0 {
+		return
+	}
+	// Find current position in visible list.
+	pos := 0
+	for i, idx := range visible {
+		if idx == m.cursor {
+			pos = i
+			break
+		}
+	}
+	pos = (pos + delta + len(visible)) % len(visible)
+	m.cursor = visible[pos]
+}
+
+// resetCursor points cursor at the first non-separator item.
+func (m *Model) resetCursor() {
+	for i, it := range m.items {
+		if !it.isSeparator {
+			m.cursor = i
+			return
+		}
+	}
+}
+
+// snapCursorToFirstMatch snaps the cursor to the first filter-matching item.
+func (m *Model) snapCursorToFirstMatch() {
+	visible := m.visibleIndices()
+	if len(visible) > 0 {
+		m.cursor = visible[0]
+	}
+}
+
+// visibleIndices returns the indices of items that currently match the filter
+// (or all selectable items when filter is empty / inactive).
+func (m Model) visibleIndices() []int {
+	var out []int
+	q := strings.ToLower(strings.TrimSpace(m.filterText))
+	for i, it := range m.items {
+		if it.isSeparator {
+			continue
+		}
+		if !m.filterMode || q == "" {
+			out = append(out, i)
+			continue
+		}
+		hay := strings.ToLower(it.label + " " + it.desc)
+		if strings.Contains(hay, q) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "quit":
@@ -173,6 +303,14 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 		m.screen = screenSub
 		m.sub = inspect.New()
 		return m, m.sub.Init()
+	case "remote":
+		m.screen = screenSub
+		m.sub = remote.New()
+		return m, m.sub.Init()
+	case "batch_inspect":
+		m.screen = screenSub
+		m.sub = batch.New()
+		return m, m.sub.Init()
 	case "verify_chain":
 		m.screen = screenSub
 		m.sub = verify.NewChain()
@@ -192,6 +330,10 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 	case "update":
 		m.screen = screenSub
 		m.sub = update.New()
+		return m, m.sub.Init()
+	case "history":
+		m.screen = screenSub
+		m.sub = history.NewView()
 		return m, m.sub.Init()
 	}
 	return m, nil
@@ -215,16 +357,33 @@ func (m Model) View() string {
 	}
 	b.WriteString("\n")
 
+	filtering := m.filterMode && strings.TrimSpace(m.filterText) != ""
+	visibleSet := map[int]bool{}
+	matches := 0
+	if filtering {
+		for _, idx := range m.visibleIndices() {
+			visibleSet[idx] = true
+			matches++
+		}
+	}
+
 	// Build menu lines
-	for _, item := range m.items {
+	for i, item := range m.items {
 		if item.isSeparator {
+			if filtering {
+				// Hide separators while filtering.
+				continue
+			}
 			b.WriteString(fmt.Sprintf("  %s\n", ui.SeparatorStyle.Render(item.label)))
+			continue
+		}
+		if filtering && !visibleSet[i] {
 			continue
 		}
 
 		cursor := "  "
 		labelStyle := ui.InactiveStyle
-		if m.items[m.cursor].action == item.action && m.cursor == m.indexOf(item) {
+		if m.cursor == i {
 			cursor = ui.ActiveStyle.Render("➤ ")
 			labelStyle = ui.ActiveStyle
 		}
@@ -234,7 +393,17 @@ func (m Model) View() string {
 		b.WriteString(fmt.Sprintf("  %s%s %s\n", cursor, label, desc))
 	}
 
-	b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  q / ctrl+c quit") + "\n")
+	if m.filterMode {
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %s %s_  %s\n",
+			ui.ActiveStyle.Render("Filter:"),
+			m.filterText,
+			ui.DimStyle.Render("(esc to clear)")))
+		b.WriteString(fmt.Sprintf("  %s\n", ui.DimStyle.Render(fmt.Sprintf("Matches: %d", matches))))
+		b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  backspace delete  esc clear  ctrl+c quit") + "\n")
+	} else {
+		b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ navigate  enter select  / filter  q / ctrl+c quit") + "\n")
+	}
 
 	return b.String()
 }

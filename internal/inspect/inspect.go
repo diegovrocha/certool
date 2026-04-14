@@ -2,11 +2,16 @@ package inspect
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/ui"
 )
 
@@ -41,17 +46,26 @@ type CertInfo struct {
 }
 
 type Model struct {
-	step     step
-	picker   ui.FilePicker
-	passIn   textinput.Model
-	infile   string
-	password string
-	needPass bool
-	certs    []CertInfo
-	scroll   int
-	height   int
-	err      string
-	fullView bool
+	step        step
+	picker      ui.FilePicker
+	passIn      textinput.Model
+	saveIn      textinput.Model
+	saving      bool
+	saveResult  string
+	saveOk      bool
+	copyMsg     string
+	copyExpires time.Time
+	infile      string
+	password    string
+	needPass    bool
+	certs       []CertInfo
+	scroll      int
+	height      int
+	err         string
+	fullView    bool
+	logged      bool
+	pendingInspect bool
+	embedded    bool // when true, skip banner + title header (used when embedded in other sub-screens)
 }
 
 func New() tea.Model {
@@ -61,7 +75,47 @@ func New() tea.Model {
 	}
 }
 
-func (m *Model) Init() tea.Cmd { return textinput.Blink }
+// NewWithFile returns an inspect Model pre-loaded with the given file,
+// skipping the file-picker step. If the file is a PFX/P12, the model
+// advances to the password prompt instead of attempting to inspect.
+func NewWithFile(path string) tea.Model {
+	return newWithFile(path, false)
+}
+
+// NewWithFileEmbedded returns an Inspect model that skips rendering the banner
+// and title, so it can be composed inside another sub-screen (e.g. remote).
+func NewWithFileEmbedded(path string) tea.Model {
+	return newWithFile(path, true)
+}
+
+func newWithFile(path string, embedded bool) tea.Model {
+	m := &Model{infile: path, embedded: embedded}
+	ext := ""
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		ext = strings.ToLower(path[i+1:])
+	}
+	if ext == "pfx" || ext == "p12" {
+		m.needPass = true
+		m.step = stepPassword
+		m.passIn = textinput.New()
+		m.passIn.Placeholder = "PFX/P12 password"
+		m.passIn.EchoMode = textinput.EchoPassword
+		m.passIn.Focus()
+		return m
+	}
+	// Defer inspection to Init so the tea runtime can process the command.
+	m.step = stepResult
+	m.pendingInspect = true
+	return m
+}
+
+func (m *Model) Init() tea.Cmd {
+	if m.pendingInspect {
+		m.pendingInspect = false
+		return m.doInspect()
+	}
+	return textinput.Blink
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -73,26 +127,74 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.step = stepResult
 		m.scroll = 0
+		// Log successful inspect (once per result)
+		if msg.err == "" && len(msg.certs) > 0 && !m.logged {
+			history.Log("inspect",
+				history.KV("file", m.infile),
+				history.KV("cn", msg.certs[0].CN))
+			m.logged = true
+		}
+		return m, nil
+	case copyClearMsg:
+		if !time.Now().Before(m.copyExpires) {
+			m.copyMsg = ""
+		}
+		return m, nil
+	case saveResultMsg:
+		m.saving = false
+		m.saveOk = msg.ok
+		m.saveResult = msg.message
 		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
+			if m.saving {
+				m.saving = false
+				return m, nil
+			}
 			if m.step == stepResult {
 				m.step = stepFile
 				m.certs = nil
 				m.err = ""
+				m.logged = false
+				m.saveResult = ""
+				m.copyMsg = ""
 				m.picker = ui.NewCertFilePicker("Select the certificate")
 				return m, nil
 			}
 			return m, nil
 		}
 		if m.step == stepResult {
+			if m.saving {
+				if msg.String() == "enter" {
+					name := strings.TrimSpace(m.saveIn.Value())
+					if name == "" {
+						name = defaultSaveName(m.certs, m.scroll)
+					}
+					return m, m.doSave(name)
+				}
+				var cmd tea.Cmd
+				m.saveIn, cmd = m.saveIn.Update(msg)
+				return m, cmd
+			}
 			switch msg.String() {
 			case "up", "k":
-				if m.scroll > 0 { m.scroll-- }
+				if m.scroll > 0 {
+					m.scroll--
+				}
 			case "down", "j":
 				m.scroll++
 			case "f":
 				m.fullView = !m.fullView
+			case "y", "Y":
+				return m, m.doCopy()
+			case "s", "S":
+				m.saving = true
+				m.saveResult = ""
+				m.saveIn = textinput.New()
+				m.saveIn.Placeholder = defaultSaveName(m.certs, m.scroll)
+				m.saveIn.SetValue(defaultSaveName(m.certs, m.scroll))
+				m.saveIn.Focus()
+				return m, m.saveIn.Focus()
 			case "n", "N":
 				// Inspect another certificate without going back to the menu
 				m.step = stepFile
@@ -100,6 +202,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = ""
 				m.scroll = 0
 				m.fullView = false
+				m.logged = false
+				m.saveResult = ""
+				m.copyMsg = ""
 				m.picker = ui.NewCertFilePicker("Select the certificate")
 				return m, nil
 			}
@@ -143,6 +248,74 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type inspectResult struct {
 	certs []CertInfo
 	err   string
+}
+
+type copyClearMsg struct{}
+
+type saveResultMsg struct {
+	ok      bool
+	message string
+}
+
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
+
+// fullFormattedText returns plain text (no ANSI codes) for all certs.
+func (m *Model) fullFormattedText() string {
+	var b strings.Builder
+	for _, c := range m.certs {
+		b.WriteString(formatCert(c, m.fullView))
+		b.WriteString("\n")
+	}
+	return stripANSI(b.String())
+}
+
+func sanitizeFilename(s string) string {
+	if s == "" {
+		return "certificate"
+	}
+	r := strings.NewReplacer(
+		"*", "_", " ", "_", "/", "_", "\\", "_",
+		":", "_", "?", "_", "\"", "_", "<", "_",
+		">", "_", "|", "_",
+	)
+	out := r.Replace(s)
+	return strings.Trim(out, "._")
+}
+
+func defaultSaveName(certs []CertInfo, _ int) string {
+	if len(certs) == 0 {
+		return "certificate.txt"
+	}
+	return sanitizeFilename(certs[0].CN) + ".txt"
+}
+
+func (m *Model) doCopy() tea.Cmd {
+	text := m.fullFormattedText()
+	m.copyExpires = time.Now().Add(2 * time.Second)
+	if err := clipboard.WriteAll(text); err != nil {
+		m.copyMsg = "✖ Copy failed: " + err.Error()
+	} else {
+		m.copyMsg = "✔ Copied to clipboard"
+	}
+	exp := m.copyExpires
+	return tea.Tick(2100*time.Millisecond, func(t time.Time) tea.Msg {
+		_ = exp
+		return copyClearMsg{}
+	})
+}
+
+func (m *Model) doSave(name string) tea.Cmd {
+	text := m.fullFormattedText()
+	return func() tea.Msg {
+		if err := os.WriteFile(name, []byte(text), 0644); err != nil {
+			return saveResultMsg{ok: false, message: "Could not save: " + err.Error()}
+		}
+		return saveResultMsg{ok: true, message: "File: " + name}
+	}
 }
 
 func (m *Model) doInspect() tea.Cmd {
@@ -199,9 +372,11 @@ func (m *Model) doInspect() tea.Cmd {
 
 func (m *Model) View() string {
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(ui.Banner())
-	b.WriteString("\n  " + ui.TitleStyle.Render("── Inspect Certificate ──") + "\n\n")
+	if !m.embedded {
+		b.WriteString("\n")
+		b.WriteString(ui.Banner())
+		b.WriteString("\n  " + ui.TitleStyle.Render("── Inspect Certificate ──") + "\n\n")
+	}
 
 	switch m.step {
 	case stepFile:
@@ -215,6 +390,9 @@ func (m *Model) View() string {
 	case stepResult:
 		if m.err != "" {
 			b.WriteString(ui.ResultBox(false, "Error", m.err))
+		} else if m.saving {
+			b.WriteString("  Save certificate details to file:\n\n")
+			b.WriteString("  " + m.saveIn.View() + "\n")
 		} else {
 			// Build all cert lines
 			var certLines []string
@@ -272,7 +450,25 @@ func (m *Model) View() string {
 	}
 
 	if m.step == stepResult && m.err == "" {
-		b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ scroll  n inspect another  f toggle full view  esc back  ctrl+c quit") + "\n")
+		// Transient copy message
+		if m.copyMsg != "" && time.Now().Before(m.copyExpires) {
+			b.WriteString("\n  " + ui.SuccessStyle.Render(m.copyMsg) + "\n")
+		}
+		// Save result
+		if m.saveResult != "" {
+			b.WriteString("\n")
+			if m.saveOk {
+				b.WriteString(ui.ResultBox(true, "Saved", m.saveResult))
+			} else {
+				b.WriteString(ui.ResultBox(false, "Error", m.saveResult))
+			}
+			b.WriteString("\n")
+		}
+		if m.saving {
+			b.WriteString("\n  " + ui.DimStyle.Render("enter save  esc cancel  ctrl+c quit") + "\n")
+		} else {
+			b.WriteString("\n  " + ui.DimStyle.Render("↑/↓ scroll  n inspect another  f toggle full view  y copy  s save  esc back  ctrl+c quit") + "\n")
+		}
 	} else {
 		b.WriteString("\n  " + ui.DimStyle.Render("esc back  ↑/↓ navigate  enter confirm  ctrl+c quit") + "\n")
 	}

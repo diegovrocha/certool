@@ -3,6 +3,8 @@ package menu
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNewMenu(t *testing.T) {
@@ -65,7 +67,7 @@ func TestMenuHasAllActions(t *testing.T) {
 
 	expectedActions := []string{
 		"pfx_pem", "pfx_cer_pem", "pfx_cer_der", "pfx_key", "pfx_repack",
-		"inspect", "verify_chain", "verify_key", "compare_hash", "gen_self", "update", "quit",
+		"inspect", "remote", "batch_inspect", "verify_chain", "verify_key", "compare_hash", "gen_self", "history", "update", "quit",
 	}
 
 	actions := make(map[string]bool)
@@ -110,5 +112,104 @@ func TestMenuQuit(t *testing.T) {
 
 	if !strings.Contains(v, "Goodbye") {
 		t.Error("View on quit should show 'Goodbye'")
+	}
+}
+
+func sendKey(m Model, key string) Model {
+	var km tea.KeyMsg
+	if len(key) == 1 {
+		km = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+	} else {
+		switch key {
+		case "esc":
+			km = tea.KeyMsg{Type: tea.KeyEsc}
+		case "backspace":
+			km = tea.KeyMsg{Type: tea.KeyBackspace}
+		case "enter":
+			km = tea.KeyMsg{Type: tea.KeyEnter}
+		case "up":
+			km = tea.KeyMsg{Type: tea.KeyUp}
+		case "down":
+			km = tea.KeyMsg{Type: tea.KeyDown}
+		default:
+			km = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		}
+	}
+	next, _ := m.Update(km)
+	return next.(Model)
+}
+
+func TestFuzzyFilterActivation(t *testing.T) {
+	m := New()
+	if m.filterMode {
+		t.Fatal("filterMode should start false")
+	}
+	m = sendKey(m, "/")
+	if !m.filterMode {
+		t.Error("after '/', filterMode should be true")
+	}
+}
+
+func TestFuzzyFilterText(t *testing.T) {
+	m := New()
+	m = sendKey(m, "/")
+	m = sendKey(m, "i")
+	m = sendKey(m, "n")
+	m = sendKey(m, "s")
+	if m.filterText != "ins" {
+		t.Errorf("filterText: got %q want %q", m.filterText, "ins")
+	}
+}
+
+func TestFuzzyFilterBackspace(t *testing.T) {
+	m := New()
+	m = sendKey(m, "/")
+	m = sendKey(m, "a")
+	m = sendKey(m, "b")
+	m = sendKey(m, "c")
+	if m.filterText != "abc" {
+		t.Fatalf("setup: got filterText=%q", m.filterText)
+	}
+	m = sendKey(m, "backspace")
+	if m.filterText != "ab" {
+		t.Errorf("after backspace: got %q want ab", m.filterText)
+	}
+}
+
+func TestFuzzyFilterEsc(t *testing.T) {
+	m := New()
+	m = sendKey(m, "/")
+	m = sendKey(m, "x")
+	if !m.filterMode || m.filterText == "" {
+		t.Fatal("setup: filter should be active with text")
+	}
+	m = sendKey(m, "esc")
+	if m.filterMode {
+		t.Error("after esc, filterMode should be false")
+	}
+	if m.filterText != "" {
+		t.Errorf("after esc, filterText should be empty, got %q", m.filterText)
+	}
+}
+
+func TestFuzzyMatchItems(t *testing.T) {
+	m := New()
+	m.filterMode = true
+	m.filterText = "insp"
+
+	visible := m.visibleIndices()
+	if len(visible) == 0 {
+		t.Fatal("filter 'insp' should match at least one item")
+	}
+	for _, idx := range visible {
+		it := m.items[idx]
+		hay := strings.ToLower(it.label + " " + it.desc)
+		if !strings.Contains(hay, "insp") {
+			t.Errorf("visible item %q (desc %q) does not contain filter 'insp'", it.label, it.desc)
+		}
+	}
+	// At least "Inspect" and "Batch inspect" should match.
+	if len(visible) < 2 {
+		t.Errorf("expected >=2 matches for 'insp', got %d", len(visible))
 	}
 }

@@ -30,12 +30,15 @@ type Model struct {
 	step      step
 	current   string
 	latest    string
+	body      string
+	scroll    int
 	result    string
 	success   bool
 }
 
 type updateInfoMsg struct {
 	latest string
+	body   string
 	err    string
 }
 
@@ -70,12 +73,13 @@ func fetchLatestVersion() tea.Msg {
 
 	var release struct {
 		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return updateInfoMsg{err: "Invalid response from GitHub"}
 	}
 
-	return updateInfoMsg{latest: strings.TrimPrefix(release.TagName, "v")}
+	return updateInfoMsg{latest: strings.TrimPrefix(release.TagName, "v"), body: release.Body}
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -88,6 +92,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.latest = msg.latest
+		m.body = msg.body
 		return m, nil
 
 	case downloadResultMsg:
@@ -99,6 +104,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
 			return m, nil
+		}
+		if m.step == stepConfirm {
+			switch msg.String() {
+			case "up", "k":
+				if m.scroll > 0 {
+					m.scroll--
+				}
+				return m, nil
+			case "down", "j":
+				m.scroll++
+				return m, nil
+			}
 		}
 		if m.step == stepConfirm && msg.String() == "enter" {
 			if m.latest == "" {
@@ -315,7 +332,42 @@ func (m *Model) View() string {
 				b.WriteString("\n  " + ui.SuccessStyle.Render("✔ You are on the latest version") + "\n")
 			} else {
 				b.WriteString("\n  " + ui.WarnStyle.Render("⚠ Update available") + "\n")
-				b.WriteString("\n  " + ui.DimStyle.Render("Press ENTER to download and install the update") + "\n")
+				// Changelog
+				if strings.TrimSpace(m.body) != "" {
+					b.WriteString("\n  " + ui.TitleStyle.Render("Changelog:") + "\n")
+					lines := strings.Split(strings.ReplaceAll(m.body, "\r\n", "\n"), "\n")
+					const maxLines = 15
+					total := len(lines)
+					if m.scroll < 0 {
+						m.scroll = 0
+					}
+					if total <= maxLines {
+						m.scroll = 0
+						for _, l := range lines {
+							b.WriteString("    " + ui.DimStyle.Render(l) + "\n")
+						}
+					} else {
+						maxScroll := total - maxLines
+						if m.scroll > maxScroll {
+							m.scroll = maxScroll
+						}
+						end := m.scroll + maxLines
+						if end > total {
+							end = total
+						}
+						if m.scroll > 0 {
+							b.WriteString("    " + ui.DimStyle.Render(fmt.Sprintf("↑ %d lines above", m.scroll)) + "\n")
+						}
+						for i := m.scroll; i < end; i++ {
+							b.WriteString("    " + ui.DimStyle.Render(lines[i]) + "\n")
+						}
+						remaining := total - end
+						if remaining > 0 {
+							b.WriteString("    " + ui.DimStyle.Render(fmt.Sprintf("↓ %d lines below (↑/↓ to scroll)", remaining)) + "\n")
+						}
+					}
+				}
+				b.WriteString("\n  " + ui.DimStyle.Render("Press ENTER to install, esc to cancel") + "\n")
 			}
 		}
 
