@@ -202,7 +202,9 @@ CERTUI_THEME=dark  certui
 
 ## Screenshots / demos
 
-TODO — add screenshots and an asciinema demo. For now, run `certui` to see it in action.
+![Demo](scripts/demo.gif)
+
+To regenerate: `vhs scripts/demo.tape`
 
 ## License
 
