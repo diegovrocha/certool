@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/diegovrocha/certui/internal/batch"
 	"github.com/diegovrocha/certui/internal/convert"
+	"github.com/diegovrocha/certui/internal/fetchca"
 	"github.com/diegovrocha/certui/internal/generate"
 	"github.com/diegovrocha/certui/internal/history"
 	"github.com/diegovrocha/certui/internal/inspect"
@@ -56,6 +57,7 @@ func New() Model {
 		{label: "Batch inspect", desc: "scan folder for all certs", action: "batch_inspect"},
 		{label: "Compare certs", desc: "check if two or more certs are the same", action: "compare_hash"},
 		{label: "Download from URL", desc: "fetch cert from server (TLS)", action: "remote"},
+		{label: "Fetch issuer CA", desc: "download CA chain via AIA from a cert", action: "fetch_ca"},
 		{label: "Verify chain", desc: "validate cert → CA → root", action: "verify_chain"},
 		{label: "Verify cert+key", desc: "check if cert matches key", action: "verify_key"},
 		{label: "── CONVERT ──────────────────────────────────────", isSeparator: true},
@@ -64,6 +66,7 @@ func New() Model {
 		{label: "PFX/P12 → CER", desc: "certificate DER (binary)", action: "pfx_cer_der"},
 		{label: "PFX/P12 → KEY", desc: "private key only", action: "pfx_key"},
 		{label: "PFX/P12 → P12", desc: "repack --legacy → modern", action: "pfx_repack"},
+		{label: "PFX/P12 → P12", desc: "repack modern → Java8/legacy (3DES)", action: "pfx_repack_java"},
 		{label: "── GENERATE ─────────────────────────────────────", isSeparator: true},
 		{label: "Generate self-signed", desc: "create cert + key for dev/testing", action: "gen_self"},
 		{label: "─────────────────────────────────────────────────", isSeparator: true},
@@ -318,6 +321,10 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 		m.screen = screenSub
 		m.sub = convert.NewPfxRepack()
 		return m, m.sub.Init()
+	case "pfx_repack_java":
+		m.screen = screenSub
+		m.sub = convert.NewPfxRepackJava()
+		return m, m.sub.Init()
 	case "inspect":
 		m.screen = screenSub
 		m.sub = inspect.New()
@@ -325,6 +332,10 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 	case "remote":
 		m.screen = screenSub
 		m.sub = remote.New()
+		return m, m.sub.Init()
+	case "fetch_ca":
+		m.screen = screenSub
+		m.sub = fetchca.New()
 		return m, m.sub.Init()
 	case "batch_inspect":
 		m.screen = screenSub

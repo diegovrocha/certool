@@ -31,6 +31,7 @@ const (
 	typePfxCerDer
 	typePfxKey
 	typePfxRepack
+	typePfxRepackJava
 )
 
 type Model struct {
@@ -63,6 +64,9 @@ func NewPfxToCerDer() tea.Model { return newModel(typePfxCerDer, "PFX/P12 → CE
 func NewPfxToKey() tea.Model    { return newModel(typePfxKey, "PFX/P12 → Private Key") }
 func NewPfxRepack() tea.Model {
 	return newModel(typePfxRepack, "PFX/P12 → P12 (--legacy → modern)")
+}
+func NewPfxRepackJava() tea.Model {
+	return newModel(typePfxRepackJava, "PFX/P12 → P12 (modern → Java8/legacy)")
 }
 
 func (m Model) Init() tea.Cmd { return textinput.Blink }
@@ -120,7 +124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.password = m.input.Value()
 			base := strings.TrimSuffix(filepath.Base(m.infile), filepath.Ext(m.infile))
 
-			if m.convType == typePfxRepack {
+			if m.convType == typePfxRepack || m.convType == typePfxRepackJava {
 				m.step = stepOutput
 				m.input = textinput.New()
 				m.input.SetValue(base + "_new.p12")
@@ -148,7 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stepOutput:
 		if k, ok := msg.(tea.KeyMsg); ok && k.String() == "enter" {
 			m.outfile = m.input.Value()
-			if m.convType == typePfxRepack {
+			if m.convType == typePfxRepack || m.convType == typePfxRepackJava {
 				m.step = stepPassword2
 				m.input = textinput.New()
 				m.input.Placeholder = "Password for new P12"
@@ -235,6 +239,20 @@ func (m Model) runConversion() tea.Cmd {
 				return convResult{false, "Repack failed: " + err.Error()}
 			}
 			return convResult{true, "Converted --legacy → modern (AES-256-CBC)"}
+
+		case typePfxRepackJava:
+			tmp := "/tmp/certui_repack_java.pem"
+			args := append([]string{"pkcs12", "-in", m.infile, "-out", tmp,
+				"-passin", "pass:" + m.password, "-nodes"}, legacy...)
+			if err := runOpenSSL(args...); err != nil {
+				return convResult{false, "Extraction failed: " + err.Error()}
+			}
+			if err := runOpenSSL("pkcs12", "-export", "-in", tmp, "-out", m.outfile,
+				"-passout", "pass:"+m.password2,
+				"-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES", "-macalg", "sha1"); err != nil {
+				return convResult{false, "Repack (Java8) failed: " + err.Error()}
+			}
+			return convResult{true, "Converted modern → Java8/legacy (3DES+SHA1)"}
 		}
 
 		return convResult{false, "Unknown type"}
@@ -333,6 +351,8 @@ func convTypeName(ct convType) string {
 		return "pfx_to_key"
 	case typePfxRepack:
 		return "pfx_repack"
+	case typePfxRepackJava:
+		return "pfx_repack_java"
 	}
 	return "unknown"
 }
